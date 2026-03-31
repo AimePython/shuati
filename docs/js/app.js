@@ -1,8 +1,6 @@
 (function () {
-  const USERS_KEY = "dl_trader_pages_users_v2";
-  const SESSION_KEY = "dl_trader_pages_session_v2";
-  /** 旧版匿名进度（仅兼容读一次迁移到当前用户，可选） */
-  const LEGACY_PROGRESS_KEY = "dl_trader_quiz_pages_v1";
+  const USERS_KEY = "dl_trader_pages_users_v3";
+  const SESSION_KEY = "dl_trader_pages_session_v3";
 
   const $ = (id) => document.getElementById(id);
 
@@ -143,7 +141,7 @@
       status:
         progress[q.qid] !== undefined && progress[q.qid] !== null
           ? String(progress[q.qid])
-          : String(q.status),
+          : "未做",
     }));
   }
 
@@ -540,23 +538,7 @@
     setSessionUser(username);
     setLoggedInUI(username);
     rebuildBank();
-    maybeMigrateLegacyProgress();
     renderStats();
-  }
-
-  /** 若曾用单账号匿名版刷过题，首次登录可把旧进度迁入当前账号（仅当新账号进度为空） */
-  function maybeMigrateLegacyProgress() {
-    try {
-      const newKey = progressStorageKey(currentUser);
-      if (localStorage.getItem(newKey)) return;
-      const raw = localStorage.getItem(LEGACY_PROGRESS_KEY);
-      if (!raw) return;
-      const o = JSON.parse(raw);
-      if (!o || typeof o.progress !== "object") return;
-      localStorage.setItem(newKey, JSON.stringify(o));
-    } catch {
-      /* ignore */
-    }
   }
 
   els.btnLogin.addEventListener("click", () => {
