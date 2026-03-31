@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>电力交易员 · 刷题（在线版）</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>电力交易员 · 刷题</h1>
+      <p class="subtitle">在线版 · 错题优先 · 进度保存在本机浏览器</p>
+    </header>
+
+    <section class="panel stats" id="stats-panel">
+      <div class="stat"><span class="label">总题数</span><strong id="st-total">—</strong></div>
+      <div class="stat"><span class="label">已做</span><strong id="st-done">—</strong></div>
+      <div class="stat"><span class="label">未做</span><strong id="st-undone">—</strong></div>
+      <div class="stat"><span class="label">正确</span><strong id="st-correct">—</strong></div>
+      <div class="stat"><span class="label">错题</span><strong id="st-wrong">—</strong></div>
+      <div class="stat"><span class="label">正确率</span><strong id="st-rate">—</strong></div>
+    </section>
+
+    <p class="error" id="global-error" hidden></p>
+
+    <section class="panel start-panel" id="start-panel">
+      <label class="field">
+        本轮题数
+        <input type="number" id="round-num" min="1" max="200" value="50" />
+      </label>
+      <button type="button" class="btn primary" id="btn-start">开始本轮刷题</button>
+    </section>
+
+    <section class="panel quiz-panel" id="quiz-panel" hidden>
+      <div class="quiz-head">
+        <span id="quiz-progress">第 0 / 0 题</span>
+        <span class="tag" id="q-status"></span>
+      </div>
+      <p class="q-meta"><span id="q-type-tag">—</span></p>
+      <p class="q-hint" id="q-hint"></p>
+      <article class="question" id="question-text"></article>
+      <div class="choices" id="choices"></div>
+      <button type="button" class="btn primary btn-confirm-multi" id="btn-confirm-multi" hidden>确认答案</button>
+      <div class="feedback" id="feedback" hidden>
+        <p id="feedback-msg"></p>
+        <p class="explain" id="feedback-explain"></p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-next" disabled>下一题</button>
+        <button type="button" class="btn ghost" id="btn-abort">结束本轮</button>
+      </div>
+    </section>
+
+    <section class="panel summary-panel" id="summary-panel" hidden>
+      <h2>本轮结束</h2>
+      <p class="summary-line">得分：<strong id="sum-score">0</strong> 分（每题 2 分）</p>
+      <p class="summary-line">答对：<strong id="sum-correct">0</strong> 题</p>
+      <button type="button" class="btn primary" id="btn-back">返回首页</button>
+    </section>
+
+    <footer class="footer">在线版进度保存在浏览器 localStorage；换设备或清除站点数据会丢失，与桌面版 CSV 不互通。</footer>
+  </div>
+  <script src="./js/app.js"></script>
+</body>
+</html>

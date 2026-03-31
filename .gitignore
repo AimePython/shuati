@@ -1,0 +1,10 @@
+build/
+dist/
+.venv/
+*.spec
+.DS_Store
+**/.DS_Store
+__pycache__/
+*.pyc
+.Python
+question_progress.csv

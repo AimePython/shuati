@@ -1,0 +1,4 @@
+flask>=2.3
+pandas>=2.0
+python-calamine>=0.1
+openpyxl>=3.1
