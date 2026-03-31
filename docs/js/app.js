@@ -1,5 +1,8 @@
 (function () {
-  const STORAGE_KEY = "dl_trader_quiz_pages_v1";
+  const USERS_KEY = "dl_trader_pages_users_v2";
+  const SESSION_KEY = "dl_trader_pages_session_v2";
+  /** 旧版匿名进度（仅兼容读一次迁移到当前用户，可选） */
+  const LEGACY_PROGRESS_KEY = "dl_trader_quiz_pages_v1";
 
   const $ = (id) => document.getElementById(id);
 
@@ -13,9 +16,18 @@
       rate: $("st-rate"),
     },
     err: $("global-error"),
+    authPanel: $("auth-panel"),
+    authUsername: $("auth-username"),
+    authPassword: $("auth-password"),
+    btnLogin: $("btn-login"),
+    btnRegister: $("btn-register"),
+    whoami: $("whoami"),
+    whoamiName: $("whoami-name"),
+    btnLogout: $("btn-logout"),
     roundNum: $("round-num"),
     btnStart: $("btn-start"),
     startPanel: $("start-panel"),
+    statsPanel: $("stats-panel"),
     quizPanel: $("quiz-panel"),
     summaryPanel: $("summary-panel"),
     quizProgress: $("quiz-progress"),
@@ -36,7 +48,12 @@
   };
 
   /** @type {Array<Record<string, unknown>>} */
+  let baseQuestions = [];
+  /** @type {Array<Record<string, unknown>>} */
   let bank = [];
+  let currentUser = "";
+  let questionsReady = false;
+
   let roundIds = [];
   let idx = 0;
   let roundCorrect = 0;
@@ -45,9 +62,65 @@
   let multiPicked = null;
   let currentQtype = "single";
 
-  function loadProgressMap() {
+  function progressStorageKey(username) {
+    return `dl_trader_quiz_pages_u_${username}`;
+  }
+
+  function validUsername(username) {
+    return /^[A-Za-z0-9_]{3,32}$/.test(username);
+  }
+
+  function loadUsers() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(USERS_KEY);
+      if (!raw) return {};
+      const o = JSON.parse(raw);
+      return o && typeof o === "object" ? o : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveUsers(users) {
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  }
+
+  function getSessionUser() {
+    try {
+      const u = localStorage.getItem(SESSION_KEY);
+      return u ? String(u) : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function setSessionUser(username) {
+    if (username) localStorage.setItem(SESSION_KEY, username);
+    else localStorage.removeItem(SESSION_KEY);
+  }
+
+  function randomSalt() {
+    const a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function sha256Hex(text) {
+    const enc = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(buf), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("");
+  }
+
+  async function hashPassword(password, salt) {
+    return sha256Hex(`${salt}:${password}`);
+  }
+
+  function loadProgressMap() {
+    if (!currentUser) return {};
+    try {
+      const raw = localStorage.getItem(progressStorageKey(currentUser));
       if (!raw) return {};
       const o = JSON.parse(raw);
       return o && typeof o.progress === "object" && o.progress ? o.progress : {};
@@ -57,20 +130,29 @@
   }
 
   function saveProgressMap(progress) {
+    if (!currentUser) return;
     localStorage.setItem(
-      STORAGE_KEY,
+      progressStorageKey(currentUser),
       JSON.stringify({ progress, updated: Date.now() }),
     );
   }
 
-  function mergeBank(baseQuestions, progress) {
-    return baseQuestions.map((q) => ({
+  function mergeBank(base, progress) {
+    return base.map((q) => ({
       ...q,
       status:
         progress[q.qid] !== undefined && progress[q.qid] !== null
           ? String(progress[q.qid])
           : String(q.status),
     }));
+  }
+
+  function rebuildBank() {
+    if (!currentUser || !baseQuestions.length) {
+      bank = [];
+      return;
+    }
+    bank = mergeBank(baseQuestions, loadProgressMap());
   }
 
   function normalizeUserAnswer(userIn, qtype) {
@@ -159,7 +241,6 @@
     return copy.slice(0, k);
   }
 
-  /** 与 exam.QuestionBank.get_round_questions 一致 */
   function getRoundQuestions(num) {
     const wrong = bank.filter((r) => r.status === "错误").map((r) => r.qid);
     const undone = bank.filter((r) => r.status === "未做").map((r) => r.qid);
@@ -194,6 +275,30 @@
     els.stats.correct.textContent = String(s.correct);
     els.stats.wrong.textContent = String(s.wrong);
     els.stats.rate.textContent = `${s.accuracy_percent.toFixed(1)}%`;
+  }
+
+  function setLoggedOutUI() {
+    currentUser = "";
+    els.authPanel.hidden = false;
+    els.whoami.hidden = true;
+    els.btnLogout.hidden = true;
+    els.statsPanel.hidden = true;
+    els.startPanel.hidden = true;
+    els.quizPanel.hidden = true;
+    els.summaryPanel.hidden = true;
+  }
+
+  function setLoggedInUI(username) {
+    currentUser = username;
+    els.authPanel.hidden = true;
+    els.whoami.hidden = false;
+    els.btnLogout.hidden = false;
+    els.whoamiName.textContent = username;
+    els.statsPanel.hidden = false;
+    els.startPanel.hidden = false;
+    els.quizPanel.hidden = true;
+    els.summaryPanel.hidden = true;
+    els.authPassword.value = "";
   }
 
   function clearChoices() {
@@ -350,6 +455,10 @@
   }
 
   els.btnStart.addEventListener("click", () => {
+    if (!currentUser) {
+      showError("请先登录");
+      return;
+    }
     clearError();
     const num = parseInt(els.roundNum.value, 10) || 50;
     roundIds = getRoundQuestions(Math.max(1, Math.min(num, 200)));
@@ -386,18 +495,106 @@
     renderStats();
   });
 
+  async function tryRegister() {
+    clearError();
+    const username = (els.authUsername.value || "").trim();
+    const password = (els.authPassword.value || "").trim();
+    if (!validUsername(username)) {
+      showError("用户名格式：3-32 位，仅字母/数字/下划线");
+      return;
+    }
+    if (password.length < 6) {
+      showError("密码至少 6 位");
+      return;
+    }
+    const users = loadUsers();
+    if (users[username]) {
+      showError("用户名已存在");
+      return;
+    }
+    const salt = randomSalt();
+    const hash = await hashPassword(password, salt);
+    users[username] = { salt, hash };
+    saveUsers(users);
+    setSessionUser(username);
+    setLoggedInUI(username);
+    rebuildBank();
+    renderStats();
+  }
+
+  async function tryLogin() {
+    clearError();
+    const username = (els.authUsername.value || "").trim();
+    const password = (els.authPassword.value || "").trim();
+    const users = loadUsers();
+    const rec = users[username];
+    if (!rec || !rec.salt || !rec.hash) {
+      showError("用户名或密码错误");
+      return;
+    }
+    const h = await hashPassword(password, rec.salt);
+    if (h !== rec.hash) {
+      showError("用户名或密码错误");
+      return;
+    }
+    setSessionUser(username);
+    setLoggedInUI(username);
+    rebuildBank();
+    maybeMigrateLegacyProgress();
+    renderStats();
+  }
+
+  /** 若曾用单账号匿名版刷过题，首次登录可把旧进度迁入当前账号（仅当新账号进度为空） */
+  function maybeMigrateLegacyProgress() {
+    try {
+      const newKey = progressStorageKey(currentUser);
+      if (localStorage.getItem(newKey)) return;
+      const raw = localStorage.getItem(LEGACY_PROGRESS_KEY);
+      if (!raw) return;
+      const o = JSON.parse(raw);
+      if (!o || typeof o.progress !== "object") return;
+      localStorage.setItem(newKey, JSON.stringify(o));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  els.btnLogin.addEventListener("click", () => {
+    tryLogin().catch((e) => showError(e.message || String(e)));
+  });
+  els.btnRegister.addEventListener("click", () => {
+    tryRegister().catch((e) => showError(e.message || String(e)));
+  });
+  els.btnLogout.addEventListener("click", () => {
+    clearError();
+    setSessionUser("");
+    setLoggedOutUI();
+    bank = [];
+  });
+
   async function boot() {
     clearError();
+    setLoggedOutUI();
     try {
       const r = await fetch("questions.json", { cache: "no-store" });
       if (!r.ok) throw new Error(`无法加载题库 (${r.status})`);
       const data = await r.json();
       const base = data.questions;
       if (!Array.isArray(base) || base.length === 0) {
-        throw new Error("题库为空或未运行 export_bank_for_pages.py 生成 questions.json");
+        throw new Error(
+          "题库为空或未运行 export_bank_for_pages.py 生成 questions.json",
+        );
       }
-      bank = mergeBank(base, loadProgressMap());
-      renderStats();
+      baseQuestions = base;
+      questionsReady = true;
+
+      const sess = getSessionUser();
+      const users = loadUsers();
+      if (sess && users[sess]) {
+        setLoggedInUI(sess);
+        rebuildBank();
+        renderStats();
+      }
     } catch (e) {
       showError(e.message || String(e));
     }

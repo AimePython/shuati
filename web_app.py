@@ -18,8 +18,12 @@ import threading
 import time
 import traceback
 import webbrowser
+import json
+import re
+from threading import Lock
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from exam import QuestionBank, check_answer, format_standard_display, _type_label
 
@@ -36,14 +40,68 @@ app = Flask(
     template_folder=os.path.join(_bundle_dir(), "templates"),
     static_folder=os.path.join(_bundle_dir(), "static"),
 )
-_bank: QuestionBank | None = None
+app.secret_key = os.environ.get("SECRET_KEY", "please-change-this-secret-key")
+_bank_by_user: dict[str, QuestionBank] = {}
+_bank_lock = Lock()
+
+
+def _data_dir() -> str:
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _users_file() -> str:
+    return os.path.join(_data_dir(), "users.json")
+
+
+def _progress_dir() -> str:
+    p = os.path.join(_data_dir(), "user_progress")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+_users_lock = Lock()
+
+
+def _load_users() -> dict[str, str]:
+    path = _users_file()
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def _save_users(users: dict[str, str]) -> None:
+    path = _users_file()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+
+
+def _valid_username(username: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9_]{3,32}", username))
+
+
+def _user_progress_path(username: str) -> str:
+    return os.path.join(_progress_dir(), f"{username}.csv")
+
+
+def _current_user() -> str | None:
+    u = session.get("username")
+    return str(u) if u else None
 
 
 def get_bank() -> QuestionBank:
-    global _bank
-    if _bank is None:
-        _bank = QuestionBank(quiet=True)
-    return _bank
+    user = _current_user()
+    if not user:
+        raise PermissionError("未登录")
+    with _bank_lock:
+        bank = _bank_by_user.get(user)
+        if bank is None:
+            bank = QuestionBank(progress_path=_user_progress_path(user), quiet=True)
+            _bank_by_user[user] = bank
+        return bank
 
 
 @app.route("/health")
@@ -57,9 +115,62 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/auth/me")
+def api_auth_me():
+    u = _current_user()
+    return jsonify({"ok": True, "logged_in": bool(u), "username": u})
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def api_auth_register():
+    data = request.get_json(silent=True) or {}
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", "")).strip()
+    if not _valid_username(username):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "用户名格式不正确：3-32位，仅支持字母/数字/下划线",
+            }
+        ), 400
+    if len(password) < 6:
+        return jsonify({"ok": False, "error": "密码至少 6 位"}), 400
+    with _users_lock:
+        users = _load_users()
+        if username in users:
+            return jsonify({"ok": False, "error": "用户名已存在"}), 409
+        users[username] = generate_password_hash(password)
+        _save_users(users)
+    # 新用户首次创建时不带历史记录：若文件不存在，QuestionBank 会以全“未做”初始化。
+    session["username"] = username
+    return jsonify({"ok": True, "username": username})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    data = request.get_json(silent=True) or {}
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", "")).strip()
+    with _users_lock:
+        users = _load_users()
+        h = users.get(username)
+    if not h or not check_password_hash(h, password):
+        return jsonify({"ok": False, "error": "用户名或密码错误"}), 401
+    session["username"] = username
+    return jsonify({"ok": True, "username": username})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    session.pop("username", None)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/stats")
 def api_stats():
     try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
         b = get_bank()
         return jsonify({"ok": True, **b.get_stats()})
     except Exception as e:
@@ -69,6 +180,8 @@ def api_stats():
 @app.route("/api/round/start", methods=["POST"])
 def api_round_start():
     try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
         data = request.get_json(silent=True) or {}
         num = int(data.get("num", 50))
         num = max(1, min(num, 200))
@@ -82,6 +195,8 @@ def api_round_start():
 @app.route("/api/question/<int:qid>")
 def api_question(qid: int):
     try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
         b = get_bank()
         sub = b.df[b.df["question_index"] == qid]
         if sub.empty:
@@ -114,6 +229,8 @@ def api_question(qid: int):
 @app.route("/api/answer", methods=["POST"])
 def api_answer():
     try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
         data = request.get_json(silent=True) or {}
         qid = int(data.get("qid"))
         raw = data.get("answer", "")

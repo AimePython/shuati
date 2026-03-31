@@ -11,9 +11,18 @@
       rate: $("st-rate"),
     },
     err: $("global-error"),
+    authPanel: $("auth-panel"),
+    authUsername: $("auth-username"),
+    authPassword: $("auth-password"),
+    btnLogin: $("btn-login"),
+    btnRegister: $("btn-register"),
+    whoami: $("whoami"),
+    whoamiName: $("whoami-name"),
+    btnLogout: $("btn-logout"),
     roundNum: $("round-num"),
     btnStart: $("btn-start"),
     startPanel: $("start-panel"),
+    statsPanel: $("stats-panel"),
     quizPanel: $("quiz-panel"),
     summaryPanel: $("summary-panel"),
     quizProgress: $("quiz-progress"),
@@ -33,6 +42,7 @@
     btnBack: $("btn-back"),
   };
 
+  let loggedIn = false;
   let roundIds = [];
   let idx = 0;
   let roundCorrect = 0;
@@ -46,10 +56,37 @@
       headers: { "Content-Type": "application/json", ...(options && options.headers) },
     });
     const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      setLoggedOutState();
+      throw new Error(data.error || "请先登录");
+    }
     if (!r.ok || data.ok === false) {
       throw new Error(data.error || data.detail || r.statusText || "请求失败");
     }
     return data;
+  }
+
+  function setLoggedOutState() {
+    loggedIn = false;
+    els.authPanel.hidden = false;
+    els.statsPanel.hidden = true;
+    els.startPanel.hidden = true;
+    els.quizPanel.hidden = true;
+    els.summaryPanel.hidden = true;
+    els.whoami.hidden = true;
+    els.btnLogout.hidden = true;
+  }
+
+  function setLoggedInState(username) {
+    loggedIn = true;
+    els.authPanel.hidden = true;
+    els.statsPanel.hidden = false;
+    els.startPanel.hidden = false;
+    els.quizPanel.hidden = true;
+    els.summaryPanel.hidden = true;
+    els.whoami.hidden = false;
+    els.btnLogout.hidden = false;
+    els.whoamiName.textContent = username;
   }
 
   function showError(msg) {
@@ -63,6 +100,7 @@
   }
 
   async function loadStats() {
+    if (!loggedIn) return;
     clearError();
     const s = await fetchJSON("/api/stats");
     els.stats.total.textContent = s.total;
@@ -258,5 +296,55 @@
     loadStats().catch(() => {});
   });
 
-  loadStats().catch((e) => showError(e.message || String(e)));
+  async function auth(action) {
+    clearError();
+    const username = (els.authUsername.value || "").trim();
+    const password = (els.authPassword.value || "").trim();
+    if (!username) {
+      showError("请输入用户名");
+      return;
+    }
+    if (!password) {
+      showError("请输入密码");
+      return;
+    }
+    try {
+      const res = await fetchJSON(`/api/auth/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      setLoggedInState(res.username || username);
+      els.authPassword.value = "";
+      await loadStats();
+    } catch (e) {
+      showError(e.message || String(e));
+    }
+  }
+
+  els.btnLogin.addEventListener("click", () => auth("login"));
+  els.btnRegister.addEventListener("click", () => auth("register"));
+  els.btnLogout.addEventListener("click", async () => {
+    clearError();
+    try {
+      await fetchJSON("/api/auth/logout", { method: "POST", body: "{}" });
+    } catch (_) {
+      // 即使后端响应异常也允许本地回到未登录态
+    }
+    setLoggedOutState();
+  });
+
+  async function boot() {
+    setLoggedOutState();
+    try {
+      const me = await fetchJSON("/api/auth/me");
+      if (me.logged_in) {
+        setLoggedInState(me.username || "");
+        await loadStats();
+      }
+    } catch (e) {
+      showError(e.message || String(e));
+    }
+  }
+
+  boot();
 })();

@@ -10,10 +10,31 @@
   <div class="app">
     <header class="header">
       <h1>电力交易员 · 刷题</h1>
-      <p class="subtitle">在线版 · 错题优先 · 进度保存在本机浏览器</p>
+      <p class="subtitle">在线版 · 错题优先 · 多账号（数据仅在本机浏览器）</p>
+      <p class="subtitle" id="whoami" hidden>当前用户：<strong id="whoami-name"></strong></p>
+      <button type="button" class="btn ghost" id="btn-logout" hidden>退出登录</button>
     </header>
 
-    <section class="panel stats" id="stats-panel">
+    <section class="panel" id="auth-panel">
+      <h2>登录 / 注册</h2>
+      <p class="subtitle" style="text-align:left;margin:0 0 0.75rem;font-size:0.82rem;">
+        GitHub Pages 无后端：账号仅保存在本机；换设备需重新注册，且与桌面 Flask 版 CSV 不互通。
+      </p>
+      <label class="field">
+        用户名（3-32 位，字母/数字/下划线）
+        <input type="text" id="auth-username" maxlength="32" autocomplete="username" />
+      </label>
+      <label class="field">
+        密码（至少 6 位）
+        <input type="password" id="auth-password" maxlength="64" autocomplete="current-password" />
+      </label>
+      <div class="actions">
+        <button type="button" class="btn primary" id="btn-login">登录</button>
+        <button type="button" class="btn" id="btn-register">注册新账号</button>
+      </div>
+    </section>
+
+    <section class="panel stats" id="stats-panel" hidden>
       <div class="stat"><span class="label">总题数</span><strong id="st-total">—</strong></div>
       <div class="stat"><span class="label">已做</span><strong id="st-done">—</strong></div>
       <div class="stat"><span class="label">未做</span><strong id="st-undone">—</strong></div>
@@ -24,7 +45,7 @@
 
     <p class="error" id="global-error" hidden></p>
 
-    <section class="panel start-panel" id="start-panel">
+    <section class="panel start-panel" id="start-panel" hidden>
       <label class="field">
         本轮题数
         <input type="number" id="round-num" min="1" max="200" value="50" />
@@ -59,7 +80,7 @@
       <button type="button" class="btn primary" id="btn-back">返回首页</button>
     </section>
 
-    <footer class="footer">在线版进度保存在浏览器 localStorage；换设备或清除站点数据会丢失，与桌面版 CSV 不互通。</footer>
+    <footer class="footer">每个账号的进度保存在本机 localStorage；新注册用户无历史错题。密码为浏览器端摘要存储，勿用于高敏感场景。</footer>
   </div>
   <script src="./js/app.js"></script>
 </body>

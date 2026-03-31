@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 .Python
 question_progress.csv
+users.json
+user_progress/
