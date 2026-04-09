@@ -200,12 +200,15 @@ class QuestionBank:
         self,
         excel_path="电力交易员中级工题库2025(2).xlsx",
         progress_path="question_progress.csv",
+        wrong_book_path="wrong_book.csv",
         quiet: bool = False,
     ):
         self.excel_path = _resolve_path(excel_path)
         self.progress_path = _resolve_path(progress_path)
+        self.wrong_book_path = _resolve_path(wrong_book_path)
         self.quiet = quiet
         self.df = self.load_progress()
+        self.wrong_book = self.load_wrong_book()
         self.total_questions = len(self.df)
         if not self.quiet:
             self.show_overall_progress()
@@ -232,6 +235,38 @@ class QuestionBank:
         if df is None:
             df = self.df
         df.to_csv(self.progress_path, index=False, encoding="utf-8")
+
+    def load_wrong_book(self) -> set[int]:
+        if not os.path.exists(self.wrong_book_path):
+            return set()
+        try:
+            df = pd.read_csv(self.wrong_book_path, encoding="utf-8")
+            if "question_index" not in df.columns:
+                return set()
+            ids = {
+                int(x)
+                for x in df["question_index"].dropna().tolist()
+                if str(x).strip() != ""
+            }
+            return ids
+        except Exception:
+            return set()
+
+    def save_wrong_book(self) -> None:
+        ids = sorted(self.wrong_book)
+        wb = pd.DataFrame({"question_index": ids})
+        wb.to_csv(self.wrong_book_path, index=False, encoding="utf-8")
+
+    def record_wrong_question(self, q_idx: int) -> None:
+        if int(q_idx) not in self.wrong_book:
+            self.wrong_book.add(int(q_idx))
+            self.save_wrong_book()
+
+    def clear_wrong_book(self) -> int:
+        n = len(self.wrong_book)
+        self.wrong_book = set()
+        self.save_wrong_book()
+        return n
 
     def update_question_status(self, q_idx, is_correct):
         idx = self.df[self.df["question_index"] == q_idx].index[0]
@@ -264,8 +299,9 @@ class QuestionBank:
         return selected
 
     def get_wrong_questions(self) -> list[int]:
-        """错题集重刷：仅抽当前状态为错误的题目。"""
-        wrong = self.df[self.df["status"] == "错误"]["question_index"].tolist()
+        """错题集重刷：按独立错题本 wrong_book.csv。"""
+        valid = set(self.df["question_index"].tolist())
+        wrong = [qid for qid in self.wrong_book if qid in valid]
         random.shuffle(wrong)
         return wrong
 
@@ -282,6 +318,7 @@ class QuestionBank:
             "undone": int(undone),
             "correct": int(correct),
             "wrong": int(wrong),
+            "wrong_book": int(len(self.wrong_book)),
             "accuracy_percent": rate_pct,
         }
 

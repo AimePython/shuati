@@ -25,6 +25,8 @@
     btnStart: $("btn-start"),
     btnStartWrong: $("btn-start-wrong"),
     modeTag: $("mode-tag"),
+    wrongBookCount: $("wrong-book-count"),
+    btnClearWrongBook: $("btn-clear-wrong-book"),
     startPanel: $("start-panel"),
     statsPanel: $("stats-panel"),
     quizPanel: $("quiz-panel"),
@@ -50,6 +52,8 @@
   let baseQuestions = [];
   /** @type {Array<Record<string, unknown>>} */
   let bank = [];
+  /** @type {Set<number>} */
+  let wrongBook = new Set();
   let currentUser = "";
   let questionsReady = false;
 
@@ -132,9 +136,15 @@
       const raw = localStorage.getItem(progressStorageKey(currentUser));
       if (!raw) return {};
       const o = JSON.parse(raw);
-      return o && typeof o.progress === "object" && o.progress ? o.progress : {};
+      return {
+        progress: o && typeof o.progress === "object" && o.progress ? o.progress : {},
+        wrongBook:
+          o && Array.isArray(o.wrongBook)
+            ? new Set(o.wrongBook.map((x) => Number(x)).filter((x) => Number.isInteger(x)))
+            : new Set(),
+      };
     } catch {
-      return {};
+      return { progress: {}, wrongBook: new Set() };
     }
   }
 
@@ -142,7 +152,7 @@
     if (!currentUser) return;
     localStorage.setItem(
       progressStorageKey(currentUser),
-      JSON.stringify({ progress, updated: Date.now() }),
+      JSON.stringify({ progress, wrongBook: Array.from(wrongBook), updated: Date.now() }),
     );
   }
 
@@ -159,9 +169,12 @@
   function rebuildBank() {
     if (!currentUser || !baseQuestions.length) {
       bank = [];
+      wrongBook = new Set();
       return;
     }
-    bank = mergeBank(baseQuestions, loadProgressMap());
+    const data = loadProgressMap();
+    bank = mergeBank(baseQuestions, data.progress);
+    wrongBook = data.wrongBook;
   }
 
   function normalizeUserAnswer(userIn, qtype) {
@@ -220,7 +233,15 @@
     }
     const undone = total - done;
     const ratePct = done ? Math.round((correct / done) * 1000) / 10 : 0;
-    return { total, done, undone, correct, wrong, accuracy_percent: ratePct };
+    return {
+      total,
+      done,
+      undone,
+      correct,
+      wrong,
+      wrong_book: wrongBook.size,
+      accuracy_percent: ratePct,
+    };
   }
 
   function persistBankProgress() {
@@ -233,6 +254,9 @@
     const row = bank.find((r) => r.qid === qid);
     if (!row) return;
     row.status = isCorrect ? "正确" : "错误";
+    if (!isCorrect) {
+      wrongBook.add(Number(qid));
+    }
     persistBankProgress();
   }
 
@@ -278,7 +302,8 @@
   }
 
   function getWrongQuestions() {
-    const wrong = bank.filter((r) => r.status === "错误").map((r) => r.qid);
+    const valid = new Set(bank.map((r) => Number(r.qid)));
+    const wrong = Array.from(wrongBook).filter((qid) => valid.has(Number(qid)));
     shuffleInPlace(wrong);
     return wrong;
   }
@@ -301,6 +326,9 @@
     els.stats.correct.textContent = String(s.correct);
     els.stats.wrong.textContent = String(s.wrong);
     els.stats.rate.textContent = `${s.accuracy_percent.toFixed(1)}%`;
+    if (els.wrongBookCount) {
+      els.wrongBookCount.textContent = `${s.wrong_book || 0} 题`;
+    }
   }
 
   function setLoggedOutUI() {
@@ -516,6 +544,19 @@
     startRound("wrong");
   });
 
+  els.btnClearWrongBook.addEventListener("click", () => {
+    clearError();
+    const ok = window.confirm("确认清空错题本？此操作不会改动当前做题进度。");
+    if (!ok) return;
+    wrongBook = new Set();
+    persistBankProgress();
+    if (currentRoundMode === "wrong") {
+      currentRoundMode = "normal";
+      refreshRoundModeUI();
+    }
+    renderStats();
+  });
+
   els.btnNext.addEventListener("click", () => {
     idx += 1;
     if (idx >= roundIds.length) {
@@ -596,6 +637,7 @@
     setSessionUser("");
     setLoggedOutUI();
     bank = [];
+    wrongBook = new Set();
   });
 
   async function boot() {

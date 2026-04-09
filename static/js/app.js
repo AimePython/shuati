@@ -22,6 +22,8 @@
     btnStart: $("btn-start"),
     btnStartWrong: $("btn-start-wrong"),
     modeTag: $("mode-tag"),
+    wrongBookCount: $("wrong-book-count"),
+    btnClearWrongBook: $("btn-clear-wrong-book"),
     startPanel: $("start-panel"),
     statsPanel: $("stats-panel"),
     quizPanel: $("quiz-panel"),
@@ -121,6 +123,9 @@
     els.stats.correct.textContent = s.correct;
     els.stats.wrong.textContent = s.wrong;
     els.stats.rate.textContent = `${s.accuracy_percent.toFixed(1)}%`;
+    if (els.wrongBookCount) {
+      els.wrongBookCount.textContent = `${s.wrong_book || 0} 题`;
+    }
   }
 
   function clearChoices() {
@@ -302,6 +307,22 @@
     currentRoundMode = "wrong";
     refreshRoundModeUI();
     startRound("wrong");
+  });
+
+  els.btnClearWrongBook.addEventListener("click", async () => {
+    clearError();
+    const ok = window.confirm("确认清空错题本？此操作不会改动当前做题进度。");
+    if (!ok) return;
+    try {
+      await fetchJSON("/api/wrong-book/clear", { method: "POST", body: "{}" });
+      if (currentRoundMode === "wrong") {
+        currentRoundMode = "normal";
+        refreshRoundModeUI();
+      }
+      await loadStats();
+    } catch (e) {
+      showError(e.message || String(e));
+    }
   });
 
   els.btnNext.addEventListener("click", () => {

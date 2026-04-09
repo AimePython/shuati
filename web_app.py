@@ -87,6 +87,10 @@ def _user_progress_path(username: str) -> str:
     return os.path.join(_progress_dir(), f"{username}.csv")
 
 
+def _user_wrong_book_path(username: str) -> str:
+    return os.path.join(_progress_dir(), f"{username}_wrong_book.csv")
+
+
 def _current_user() -> str | None:
     u = session.get("username")
     return str(u) if u else None
@@ -99,7 +103,11 @@ def get_bank() -> QuestionBank:
     with _bank_lock:
         bank = _bank_by_user.get(user)
         if bank is None:
-            bank = QuestionBank(progress_path=_user_progress_path(user), quiet=True)
+            bank = QuestionBank(
+                progress_path=_user_progress_path(user),
+                wrong_book_path=_user_wrong_book_path(user),
+                quiet=True,
+            )
             _bank_by_user[user] = bank
         return bank
 
@@ -250,6 +258,8 @@ def api_answer():
         std = str(row["标准答案"]).strip()
         is_ok = check_answer(ans, std, qt)
         b.update_question_status(qid, is_ok)
+        if not is_ok:
+            b.record_wrong_question(qid)
         disp = format_standard_display(std, qt)
         return jsonify(
             {
@@ -262,6 +272,18 @@ def api_answer():
                 "question_type": qt,
             }
         )
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/wrong-book/clear", methods=["POST"])
+def api_wrong_book_clear():
+    try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
+        b = get_bank()
+        cleared = b.clear_wrong_book()
+        return jsonify({"ok": True, "cleared": cleared})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
