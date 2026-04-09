@@ -43,11 +43,12 @@
     <p class="error" id="global-error" hidden></p>
 
     <section class="panel start-panel" id="start-panel">
-      <label class="field">
-        本轮题数
-        <input type="number" id="round-num" min="1" max="200" value="50" />
-      </label>
-      <button type="button" class="btn primary" id="btn-start">开始本轮刷题</button>
+      <p class="summary-line">固定抽题：随机 100 道单选 + 30 道多选 + 40 道判断（错题优先）</p>
+      <p class="mode-line">当前模式：<span class="mode-tag" id="mode-tag">普通刷题</span></p>
+      <div class="actions">
+        <button type="button" class="btn primary" id="btn-start">开始本轮刷题</button>
+        <button type="button" class="btn" id="btn-start-wrong">错题集重刷</button>
+      </div>
     </section>
 
     <section class="panel quiz-panel" id="quiz-panel" hidden>

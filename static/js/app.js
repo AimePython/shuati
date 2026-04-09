@@ -19,8 +19,9 @@
     whoami: $("whoami"),
     whoamiName: $("whoami-name"),
     btnLogout: $("btn-logout"),
-    roundNum: $("round-num"),
     btnStart: $("btn-start"),
+    btnStartWrong: $("btn-start-wrong"),
+    modeTag: $("mode-tag"),
     startPanel: $("start-panel"),
     statsPanel: $("stats-panel"),
     quizPanel: $("quiz-panel"),
@@ -49,6 +50,16 @@
   let answered = false;
   let multiPicked = null;
   let currentQtype = "single";
+  let currentRoundMode = "normal";
+
+  function refreshRoundModeUI() {
+    const isWrong = currentRoundMode === "wrong";
+    if (els.modeTag) {
+      els.modeTag.textContent = isWrong ? "错题重刷" : "普通刷题";
+    }
+    els.btnStart.classList.toggle("primary", !isWrong);
+    els.btnStartWrong.classList.toggle("primary", isWrong);
+  }
 
   async function fetchJSON(url, options) {
     const r = await fetch(url, {
@@ -87,6 +98,7 @@
     els.whoami.hidden = false;
     els.btnLogout.hidden = false;
     els.whoamiName.textContent = username;
+    refreshRoundModeUI();
   }
 
   function showError(msg) {
@@ -251,19 +263,24 @@
     loadStats().catch(() => {});
   }
 
-  els.btnStart.addEventListener("click", async () => {
+  async function startRound(mode) {
     clearError();
-    const num = parseInt(els.roundNum.value, 10) || 50;
     try {
       const data = await fetchJSON("/api/round/start", {
         method: "POST",
-        body: JSON.stringify({ num }),
+        body: JSON.stringify({ mode }),
       });
       roundIds = data.question_ids;
       idx = 0;
       roundCorrect = 0;
+      currentRoundMode = data.mode || mode || "normal";
+      refreshRoundModeUI();
       if (!roundIds.length) {
-        showError("没有可抽取的题目（请检查题库与进度）。");
+        if (currentRoundMode === "wrong") {
+          showError("当前错题集为空，暂无可重刷题目。");
+        } else {
+          showError("没有可抽取的题目（请检查题库与进度）。");
+        }
         return;
       }
       els.startPanel.hidden = true;
@@ -273,6 +290,18 @@
     } catch (e) {
       showError(e.message || String(e));
     }
+  }
+
+  els.btnStart.addEventListener("click", () => {
+    currentRoundMode = "normal";
+    refreshRoundModeUI();
+    startRound("normal");
+  });
+
+  els.btnStartWrong.addEventListener("click", () => {
+    currentRoundMode = "wrong";
+    refreshRoundModeUI();
+    startRound("wrong");
   });
 
   els.btnNext.addEventListener("click", () => {
@@ -335,6 +364,7 @@
 
   async function boot() {
     setLoggedOutState();
+    refreshRoundModeUI();
     try {
       const me = await fetchJSON("/api/auth/me");
       if (me.logged_in) {

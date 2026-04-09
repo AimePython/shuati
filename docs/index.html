@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>电力交易员 · 刷题（在线版）</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260331b" />
+  <link rel="stylesheet" href="./css/style.css?v=20260409a" />
 </head>
 <body>
   <div class="app">
@@ -43,11 +43,12 @@
     <p class="error" id="global-error" hidden></p>
 
     <section class="panel start-panel" id="start-panel" hidden>
-      <label class="field">
-        本轮题数
-        <input type="number" id="round-num" min="1" max="200" value="50" />
-      </label>
-      <button type="button" class="btn primary" id="btn-start">开始本轮刷题</button>
+      <p class="summary-line">固定抽题：随机 100 道单选 + 30 道多选 + 40 道判断（错题优先）</p>
+      <p class="mode-line">当前模式：<span class="mode-tag" id="mode-tag">普通刷题</span></p>
+      <div class="actions">
+        <button type="button" class="btn primary" id="btn-start">开始本轮刷题</button>
+        <button type="button" class="btn" id="btn-start-wrong">错题集重刷</button>
+      </div>
     </section>
 
     <section class="panel quiz-panel" id="quiz-panel" hidden>
@@ -79,6 +80,6 @@
 
     <footer class="footer">每个账号的进度保存在本机 localStorage；新注册用户无历史错题。密码为浏览器端摘要存储，勿用于高敏感场景。</footer>
   </div>
-  <script src="./js/app.js?v=20260331b"></script>
+  <script src="./js/app.js?v=20260409a"></script>
 </body>
 </html>

@@ -22,8 +22,9 @@
     whoami: $("whoami"),
     whoamiName: $("whoami-name"),
     btnLogout: $("btn-logout"),
-    roundNum: $("round-num"),
     btnStart: $("btn-start"),
+    btnStartWrong: $("btn-start-wrong"),
+    modeTag: $("mode-tag"),
     startPanel: $("start-panel"),
     statsPanel: $("stats-panel"),
     quizPanel: $("quiz-panel"),
@@ -59,6 +60,16 @@
   /** @type {Set<string> | null} */
   let multiPicked = null;
   let currentQtype = "single";
+  let currentRoundMode = "normal";
+
+  function refreshRoundModeUI() {
+    const isWrong = currentRoundMode === "wrong";
+    if (els.modeTag) {
+      els.modeTag.textContent = isWrong ? "错题重刷" : "普通刷题";
+    }
+    els.btnStart.classList.toggle("primary", !isWrong);
+    els.btnStartWrong.classList.toggle("primary", isWrong);
+  }
 
   function progressStorageKey(username) {
     return `dl_trader_quiz_pages_u_${username}`;
@@ -239,20 +250,37 @@
     return copy.slice(0, k);
   }
 
-  function getRoundQuestions(num) {
-    const wrong = bank.filter((r) => r.status === "错误").map((r) => r.qid);
-    const undone = bank.filter((r) => r.status === "未做").map((r) => r.qid);
-    const selected = wrong.slice(0, num);
-    let need = num - selected.length;
+  function pickByType(qtype, target) {
+    const pool = bank.filter((r) => r.question_type === qtype);
+    const wrong = pool.filter((r) => r.status === "错误").map((r) => r.qid);
+    const undone = pool.filter((r) => r.status === "未做").map((r) => r.qid);
+    const correct = pool.filter((r) => r.status === "正确").map((r) => r.qid);
+    const selected = wrong.slice();
+    let need = target - selected.length;
     if (need > 0 && undone.length) {
-      const extra = sampleWithoutReplacement(
-        undone,
-        Math.min(need, undone.length),
-      );
-      selected.push(...extra);
+      selected.push(...sampleWithoutReplacement(undone, Math.min(need, undone.length)));
+    }
+    need = target - selected.length;
+    if (need > 0 && correct.length) {
+      selected.push(...sampleWithoutReplacement(correct, Math.min(need, correct.length)));
     }
     shuffleInPlace(selected);
+    return selected.slice(0, target);
+  }
+
+  function getRoundQuestions() {
+    const selected = [];
+    selected.push(...pickByType("single", 100));
+    selected.push(...pickByType("multi", 30));
+    selected.push(...pickByType("judge", 40));
+    shuffleInPlace(selected);
     return selected;
+  }
+
+  function getWrongQuestions() {
+    const wrong = bank.filter((r) => r.status === "错误").map((r) => r.qid);
+    shuffleInPlace(wrong);
+    return wrong;
   }
 
   function showError(msg) {
@@ -284,6 +312,8 @@
     els.startPanel.hidden = true;
     els.quizPanel.hidden = true;
     els.summaryPanel.hidden = true;
+    currentRoundMode = "normal";
+    refreshRoundModeUI();
   }
 
   function setLoggedInUI(username) {
@@ -297,6 +327,7 @@
     els.quizPanel.hidden = true;
     els.summaryPanel.hidden = true;
     els.authPassword.value = "";
+    refreshRoundModeUI();
   }
 
   function clearChoices() {
@@ -452,24 +483,37 @@
     renderStats();
   }
 
-  els.btnStart.addEventListener("click", () => {
+  function startRound(mode) {
     if (!currentUser) {
       showError("请先登录");
       return;
     }
     clearError();
-    const num = parseInt(els.roundNum.value, 10) || 50;
-    roundIds = getRoundQuestions(Math.max(1, Math.min(num, 200)));
+    currentRoundMode = mode === "wrong" ? "wrong" : "normal";
+    refreshRoundModeUI();
+    roundIds = mode === "wrong" ? getWrongQuestions() : getRoundQuestions();
     idx = 0;
     roundCorrect = 0;
     if (!roundIds.length) {
-      showError("没有可抽取的题目（请检查题库与进度）。");
+      if (mode === "wrong") {
+        showError("当前错题集为空，暂无可重刷题目。");
+      } else {
+        showError("没有可抽取的题目（请检查题库与进度）。");
+      }
       return;
     }
     els.startPanel.hidden = true;
     els.summaryPanel.hidden = true;
     els.quizPanel.hidden = false;
     showQuestion();
+  }
+
+  els.btnStart.addEventListener("click", () => {
+    startRound("normal");
+  });
+
+  els.btnStartWrong.addEventListener("click", () => {
+    startRound("wrong");
   });
 
   els.btnNext.addEventListener("click", () => {

@@ -183,11 +183,14 @@ def api_round_start():
         if not _current_user():
             return jsonify({"ok": False, "error": "未登录"}), 401
         data = request.get_json(silent=True) or {}
-        num = int(data.get("num", 50))
-        num = max(1, min(num, 200))
+        mode = str(data.get("mode", "normal")).strip().lower()
         b = get_bank()
-        ids = b.get_round_questions(num)
-        return jsonify({"ok": True, "question_ids": ids, "count": len(ids)})
+        if mode == "wrong":
+            ids = b.get_wrong_questions()
+        else:
+            mode = "normal"
+            ids = b.get_round_questions()
+        return jsonify({"ok": True, "mode": mode, "question_ids": ids, "count": len(ids)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

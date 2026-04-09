@@ -26,6 +26,7 @@ _OPTION_COLS = ("选项 A", "选项 B", "选项 C", "选项 D", "选项 E", "选
 Q_SINGLE_END = 350
 Q_MULTI_START, Q_MULTI_END = 351, 550
 Q_JUDGE_START, Q_JUDGE_END = 551, 790
+ROUND_PLAN = {"single": 100, "multi": 30, "judge": 40}
 
 def _resolve_path(path: str) -> str:
     return path if os.path.isabs(path) else os.path.join(_SCRIPT_DIR, path)
@@ -237,15 +238,36 @@ class QuestionBank:
         self.df.at[idx, "status"] = "正确" if is_correct else "错误"
         self.save_progress()
 
-    def get_round_questions(self, num=50):
-        wrong = self.df[self.df["status"] == "错误"]["question_index"].tolist()
-        undone = self.df[self.df["status"] == "未做"]["question_index"].tolist()
-        selected = wrong[:num]
-        need = num - len(selected)
+    def _pick_questions_by_type(self, qtype: str, target: int) -> list[int]:
+        """按题型抽题：错题优先，其次未做，再补正确题，最后打乱。"""
+        pool = self.df[self.df["题目类型"] == qtype]
+        wrong = pool[pool["status"] == "错误"]["question_index"].tolist()
+        undone = pool[pool["status"] == "未做"]["question_index"].tolist()
+        correct = pool[pool["status"] == "正确"]["question_index"].tolist()
+
+        selected = list(wrong)
+        need = target - len(selected)
         if need > 0 and undone:
             selected += random.sample(undone, min(need, len(undone)))
+        need = target - len(selected)
+        if need > 0 and correct:
+            selected += random.sample(correct, min(need, len(correct)))
+        random.shuffle(selected)
+        return selected[:target]
+
+    def get_round_questions(self) -> list[int]:
+        """固定每轮：100 单选 + 30 多选 + 40 判断（错题优先）。"""
+        selected: list[int] = []
+        for qtype, count in ROUND_PLAN.items():
+            selected += self._pick_questions_by_type(qtype, count)
         random.shuffle(selected)
         return selected
+
+    def get_wrong_questions(self) -> list[int]:
+        """错题集重刷：仅抽当前状态为错误的题目。"""
+        wrong = self.df[self.df["status"] == "错误"]["question_index"].tolist()
+        random.shuffle(wrong)
+        return wrong
 
     def get_stats(self):
         total = len(self.df)
@@ -279,9 +301,9 @@ class Exam:
     def start(self):
         while True:
             print("\n" + "="*50)
-            print("📝 开始一轮刷题（50题｜错题优先）")
+            print("📝 开始一轮刷题（100单选 + 30多选 + 40判断｜错题优先）")
             print("="*50)
-            questions = self.qb.get_round_questions(50)
+            questions = self.qb.get_round_questions()
             correct = 0
             wrong_list = []
 
