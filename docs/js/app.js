@@ -131,10 +131,11 @@
   }
 
   function loadProgressMap() {
-    if (!currentUser) return {};
+    const empty = { progress: {}, wrongBook: new Set() };
+    if (!currentUser) return empty;
     try {
       const raw = localStorage.getItem(progressStorageKey(currentUser));
-      if (!raw) return {};
+      if (!raw) return empty;
       const o = JSON.parse(raw);
       return {
         progress: o && typeof o.progress === "object" && o.progress ? o.progress : {},
@@ -144,7 +145,7 @@
             : new Set(),
       };
     } catch {
-      return { progress: {}, wrongBook: new Set() };
+      return empty;
     }
   }
 
@@ -157,11 +158,12 @@
   }
 
   function mergeBank(base, progress) {
+    const p = progress && typeof progress === "object" ? progress : {};
     return base.map((q) => ({
       ...q,
       status:
-        progress[q.qid] !== undefined && progress[q.qid] !== null
-          ? String(progress[q.qid])
+        p[q.qid] !== undefined && p[q.qid] !== null
+          ? String(p[q.qid])
           : "未做",
     }));
   }
