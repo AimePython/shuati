@@ -252,6 +252,91 @@
     saveProgressMap(progress);
   }
 
+  function getImportWrongBookMode() {
+    const el = document.querySelector('input[name="import-wb-mode"]:checked');
+    return el && el.value === "index" ? "index" : "bank";
+  }
+
+  /** 解析单行：区间 a-b 或单个数字；mode=bank 表示全库题号，转为 question_index */
+  function parseWrongBookLine(line, mode) {
+    const s = line.trim();
+    if (!s || s.startsWith("#")) return [];
+    const range = s.match(/^(\d+)\s*[-–—]\s*(\d+)$/);
+    if (range) {
+      let a = +range[1];
+      let b = +range[2];
+      if (a > b) [a, b] = [b, a];
+      const out = [];
+      for (let n = a; n <= b; n += 1) {
+        out.push(mode === "index" ? n : n - 1);
+      }
+      return out;
+    }
+    const n = parseInt(s, 10);
+    if (!Number.isInteger(n)) return [];
+    return [mode === "index" ? n : n - 1];
+  }
+
+  function parseWrongBookFreeText(text, mode) {
+    const lines = text
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const out = [];
+    for (const line of lines) {
+      out.push(...parseWrongBookLine(line, mode));
+    }
+    return out;
+  }
+
+  /**
+   * 从 CSV 解析出 question_index（0-based）。识别 question_index / 全库题号 等列；
+   * 无法识别结构化表头时返回 null，由调用方改用按行解析。
+   */
+  function tryParseWrongBookCsv(text) {
+    const raw = text.replace(/^\uFEFF/, "").trim();
+    if (!raw) return [];
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return [];
+    const sep = lines[0].includes("\t") ? "\t" : ",";
+    const head = lines[0].split(sep).map((c) => c.trim());
+    const lower = head.map((c) => c.toLowerCase());
+    const iIdx = lower.indexOf("question_index");
+    const iNum = head.findIndex(
+      (c, j) =>
+        c === "question_number" ||
+        c === "全库题号" ||
+        lower[j] === "question_number",
+    );
+    if (iIdx >= 0) {
+      return lines.slice(1).flatMap((line) => {
+        const v = parseInt(line.split(sep)[iIdx], 10);
+        return Number.isInteger(v) ? [v] : [];
+      });
+    }
+    if (iNum >= 0) {
+      return lines.slice(1).flatMap((line) => {
+        const v = parseInt(line.split(sep)[iNum], 10);
+        return Number.isInteger(v) ? [v - 1] : [];
+      });
+    }
+    if (head.length === 1 && /^question_index$/i.test(head[0])) {
+      return lines.slice(1).flatMap((line) => {
+        const v = parseInt(line.split(sep)[0], 10);
+        return Number.isInteger(v) ? [v] : [];
+      });
+    }
+    return null;
+  }
+
+  function collectImportWrongBookIndices(text, mode) {
+    const fromCsv = tryParseWrongBookCsv(text);
+    if (fromCsv !== null) return fromCsv;
+    return parseWrongBookFreeText(text, mode);
+  }
+
   function updateQuestionStatus(qid, isCorrect) {
     const row = bank.find((r) => r.qid === qid);
     if (!row) return;
@@ -557,6 +642,75 @@
       refreshRoundModeUI();
     }
     renderStats();
+  });
+
+  const importWbFile = document.getElementById("import-wb-file");
+  const importWbText = document.getElementById("import-wb-text");
+  const importWbMerge = document.getElementById("import-wb-merge");
+  const btnImportWrongBook = document.getElementById("btn-import-wrong-book");
+
+  btnImportWrongBook.addEventListener("click", () => {
+    clearError();
+    if (!currentUser) {
+      showError("请先登录后再导入错题本。");
+      return;
+    }
+    if (!bank.length) {
+      showError("题库尚未加载完成，请稍后重试。");
+      return;
+    }
+
+    const mode = getImportWrongBookMode();
+    const merge = importWbMerge && importWbMerge.checked;
+    const file = importWbFile && importWbFile.files && importWbFile.files[0];
+    const pasted = (importWbText && importWbText.value) || "";
+
+    const applyIndices = (rawText, label) => {
+      const indices = collectImportWrongBookIndices(rawText, mode);
+      const uniq = [...new Set(indices)].filter((x) => Number.isInteger(x));
+      const validSet = new Set(bank.map((r) => Number(r.qid)));
+      const okIds = uniq.filter((id) => validSet.has(id));
+      if (!okIds.length) {
+        showError(`${label}：未解析到有效题号，请检查格式或解析方式（全库题号 / 内部索引）。`);
+        return;
+      }
+      if (merge) {
+        for (const id of okIds) wrongBook.add(id);
+      } else {
+        wrongBook = new Set(okIds);
+      }
+      persistBankProgress();
+      renderStats();
+      window.alert(
+        `导入完成（${label}）\n解析 ${uniq.length} 条，其中在题库内有效 ${okIds.length} 题；当前错题本共 ${wrongBook.size} 题。`,
+      );
+    };
+
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const t = typeof reader.result === "string" ? reader.result : "";
+          applyIndices(t, `文件：${file.name}`);
+          importWbFile.value = "";
+        } catch (e) {
+          showError(e.message || String(e));
+        }
+      };
+      reader.onerror = () => showError("读取文件失败。");
+      reader.readAsText(file, "UTF-8");
+      return;
+    }
+
+    if (!pasted.trim()) {
+      showError("请选择文件，或在文本框中粘贴内容。");
+      return;
+    }
+    try {
+      applyIndices(pasted, "粘贴内容");
+    } catch (e) {
+      showError(e.message || String(e));
+    }
   });
 
   els.btnNext.addEventListener("click", () => {

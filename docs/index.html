@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>电力交易员 · 刷题（在线版）</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260409c" />
+  <link rel="stylesheet" href="./css/style.css?v=20260412b" />
 </head>
 <body>
   <div class="app">
@@ -51,6 +51,36 @@
         <button type="button" class="btn" id="btn-start-wrong">错题集重刷</button>
         <button type="button" class="btn ghost" id="btn-clear-wrong-book">清空错题本</button>
       </div>
+      <details class="import-wrong-book">
+        <summary>导入错题本</summary>
+        <p class="import-hint">
+          支持桌面版导出的 <code>wrong_book.csv</code>（含 <code>question_index</code> 列），或粘贴题号。
+          「全库题号」即界面上的「全库第 n 题」；「内部索引」与 CSV 里 <code>question_index</code> 一致（= 全库题号 − 1）。
+        </p>
+        <div class="import-options">
+          <label class="import-radio">
+            <input type="radio" name="import-wb-mode" value="bank" checked />
+            按全库题号解析（粘贴/无表头单列时）
+          </label>
+          <label class="import-radio">
+            <input type="radio" name="import-wb-mode" value="index" />
+            按内部索引解析
+          </label>
+          <label class="import-check">
+            <input type="checkbox" id="import-wb-merge" checked />
+            与现有错题本合并（取消勾选则替换）
+          </label>
+        </div>
+        <label class="field import-field">
+          选择文件（.csv / .txt）
+          <input type="file" id="import-wb-file" accept=".csv,.txt,text/plain" />
+        </label>
+        <label class="field import-field">
+          或粘贴内容（每行一题；支持区间如 <code>446-550</code>）
+          <textarea id="import-wb-text" rows="5" spellcheck="false" placeholder="446-550&#10;351&#10;352"></textarea>
+        </label>
+        <button type="button" class="btn" id="btn-import-wrong-book">执行导入</button>
+      </details>
     </section>
 
     <section class="panel quiz-panel" id="quiz-panel" hidden>
@@ -82,6 +112,6 @@
 
     <footer class="footer">每个账号的进度保存在本机 localStorage；新注册用户无历史错题。密码为浏览器端摘要存储，勿用于高敏感场景。</footer>
   </div>
-  <script src="./js/app.js?v=20260409c"></script>
+  <script src="./js/app.js?v=20260412b"></script>
 </body>
 </html>

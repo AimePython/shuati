@@ -326,6 +326,69 @@ body {
   font-weight: 600;
 }
 
+.import-wrong-book {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.import-wrong-book summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.import-hint {
+  margin: 0.65rem 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.import-hint code {
+  font-size: 0.78rem;
+  background: var(--bg);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+
+.import-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.import-radio,
+.import-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.import-field textarea {
+  width: 100%;
+  min-height: 5rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+
+#import-wb-file {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .summary-line strong {
   color: var(--text);
   font-size: 1.2rem;
