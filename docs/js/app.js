@@ -392,7 +392,6 @@
     if (!isCorrect) {
       wrongBook.add(Number(qid));
     }
-    persistBankProgress();
   }
 
   function shuffleInPlace(arr) {
@@ -605,11 +604,15 @@
     }
   }
 
-  async function submitAnswer(answerStr) {
+  function submitAnswer(answerStr) {
     if (answered) return;
     answered = true;
+    const picked = new Set(String(answerStr).toUpperCase().split(""));
     els.choices.querySelectorAll(".choice").forEach((b) => {
       b.disabled = true;
+      if (picked.has(String(b.dataset.value || "").toUpperCase())) {
+        b.classList.add("picked");
+      }
     });
     els.btnConfirmMulti.hidden = true;
 
@@ -620,8 +623,6 @@
     const qt = String(row.question_type);
     const std = String(row.standard).trim();
     const isOk = checkAnswer(answerStr, std, qt);
-    updateQuestionStatus(qid, isOk);
-
     const disp = formatStandardDisplay(std, qt);
     if (isOk) roundCorrect += 1;
 
@@ -636,7 +637,12 @@
       ex && ex !== "无" ? `解析：${ex}` : "";
 
     els.btnNext.disabled = false;
-    renderStats();
+
+    updateQuestionStatus(qid, isOk);
+    requestAnimationFrame(() => {
+      persistBankProgress();
+      renderStats();
+    });
   }
 
   function getQuestionById(qid) {

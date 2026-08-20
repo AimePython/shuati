@@ -441,6 +441,16 @@ def api_auth_login():
 
 @app.route("/api/auth/logout", methods=["POST"])
 def api_auth_logout():
+    user = _current_user()
+    if user:
+        prefix = f"{user}::"
+        with _bank_lock:
+            banks = [b for k, b in _bank_by_user.items() if k.startswith(prefix)]
+        for b in banks:
+            try:
+                b.flush_to_disk()
+            except Exception:
+                pass
     session.pop("username", None)
     return jsonify({"ok": True})
 
@@ -663,6 +673,7 @@ def api_question(qid: int):
         row = sub.iloc[0]
         qt = str(row["题目类型"])
         qnum = int(row["question_index"]) + 1
+        std = str(row["标准答案"]).strip()
         letters = option_letters_for_row(row, qt)
         return jsonify(
             {
@@ -676,6 +687,9 @@ def api_question(qid: int):
                 "hint": hint_for_type(qt, type_by_number=b.type_by_number),
                 "option_letters": letters,
                 "multi_option_count": len(letters) if qt == "multi" else None,
+                "standard_answer": std,
+                "correct_answer_display": format_standard_display(std, qt),
+                "explanation": str(row["解析"]),
             }
         )
     except Exception as e:
@@ -715,6 +729,11 @@ def api_answer():
                 "correct_answer_display": disp,
                 "explanation": str(row["解析"]),
                 "question_type": qt,
+                "stats": {
+                    "bank_id": b.bank_id,
+                    "bank_name": b.bank_name,
+                    **b.get_stats(),
+                },
             }
         )
     except Exception as e:

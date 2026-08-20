@@ -64,6 +64,7 @@
   let currentQtype = "single";
   let currentRoundMode = "normal";
   let currentPaperName = "";
+  let currentQuestion = null;
 
   function refreshRoundModeUI() {
     const isWrong = currentRoundMode === "wrong";
@@ -150,12 +151,106 @@
     els.stats.correct.textContent = s.correct;
     els.stats.wrong.textContent = s.wrong;
     els.stats.rate.textContent = `${Number(s.accuracy_percent || 0).toFixed(1)}%`;
-    if (els.wrongBookCount) {
+    if (els.wrongBookCount && s.wrong_book != null) {
       els.wrongBookCount.textContent = `${s.wrong_book || 0} 题`;
     }
     if (els.bankName && s.bank_name) {
       els.bankName.textContent = s.bank_name;
     }
+  }
+
+  function bumpStatsOptimistic(prevStatus, isCorrect) {
+    const total = parseInt(els.stats.total.textContent, 10);
+    let done = parseInt(els.stats.done.textContent, 10);
+    let correct = parseInt(els.stats.correct.textContent, 10);
+    let wrong = parseInt(els.stats.wrong.textContent, 10);
+    if (![total, done, correct, wrong].every(Number.isFinite)) return;
+    const prev = String(prevStatus || "未做");
+    const wasCorrect = prev === "正确";
+    const wasWrong = prev === "错误";
+    const wasDone = wasCorrect || wasWrong;
+    if (!wasDone) {
+      done += 1;
+      if (isCorrect) correct += 1;
+      else wrong += 1;
+    } else if (wasCorrect && !isCorrect) {
+      correct -= 1;
+      wrong += 1;
+    } else if (wasWrong && isCorrect) {
+      correct += 1;
+      wrong -= 1;
+    }
+    applyStats({
+      total,
+      done,
+      undone: Math.max(0, total - done),
+      correct,
+      wrong,
+      accuracy_percent: done ? Math.round((correct / done) * 1000) / 10 : 0,
+    });
+  }
+
+  function normalizeUserAnswer(userIn, qtype) {
+    const qt = String(qtype).trim();
+    let u = String(userIn).trim();
+    if (qt === "multi") {
+      const letters = u.toUpperCase().match(/[A-E]/g) || [];
+      const set = [...new Set(letters)];
+      set.sort();
+      return set.join("");
+    }
+    u = u.toUpperCase();
+    if (qt === "judge") {
+      if (u === "A" || u === "B") return u;
+      if (["对", "√", "V"].includes(u)) return "A";
+      if (["错", "×", "X"].includes(u)) return "B";
+      if (["T", "TRUE", "1", "Y", "YES"].includes(u)) return "A";
+      if (["F", "FALSE", "0", "N", "NO"].includes(u)) return "B";
+      const mj = u.match(/[ABCD]/);
+      return mj ? mj[0] : "";
+    }
+    const m = u.match(/[A-E]/);
+    return m ? m[0] : "";
+  }
+
+  function checkAnswer(userIn, standard, qtype) {
+    const nu = normalizeUserAnswer(userIn, qtype);
+    const ns = String(standard).trim().toUpperCase();
+    return nu === ns;
+  }
+
+  function formatStandardDisplay(standard, qtype) {
+    const s = String(standard).trim().toUpperCase();
+    const qt = String(qtype).trim();
+    if (qt === "multi") return s ? s.split("").join("、") : "";
+    if (qt === "judge") {
+      if (s === "A") return "A（对）";
+      if (s === "B") return "B（错）";
+      return s;
+    }
+    return s;
+  }
+
+  function paintFeedback(isOk, disp, explanation) {
+    els.feedback.hidden = false;
+    els.feedback.classList.toggle("ok", isOk);
+    els.feedback.classList.toggle("bad", !isOk);
+    els.feedbackMsg.textContent = isOk
+      ? `回答正确。正确答案：${disp}`
+      : `回答错误。正确答案：${disp}`;
+    const ex = (explanation || "").trim();
+    els.feedbackExplain.textContent = ex && ex !== "无" ? `解析：${ex}` : "";
+    els.btnNext.disabled = false;
+  }
+
+  function markPickedChoices(answerStr) {
+    const picked = new Set(String(answerStr).toUpperCase().split(""));
+    els.choices.querySelectorAll(".choice").forEach((b) => {
+      b.disabled = true;
+      if (picked.has(String(b.dataset.value || "").toUpperCase())) {
+        b.classList.add("picked");
+      }
+    });
   }
 
   function optionLetters(q) {
@@ -289,34 +384,48 @@
     }
   }
 
-  async function submitAnswer(answerStr) {
+  function submitAnswer(answerStr) {
     if (answered) return;
     answered = true;
-    els.choices.querySelectorAll(".choice").forEach((b) => {
-      b.disabled = true;
-    });
+    markPickedChoices(answerStr);
     els.btnConfirmMulti.hidden = true;
 
     const qid = roundIds[idx];
-    const res = await fetchJSON("/api/answer", {
+    const q = currentQuestion;
+    const std = q && q.standard_answer != null ? String(q.standard_answer) : "";
+    const canGradeLocally = Boolean(q && std);
+    if (canGradeLocally) {
+      const qt = q.question_type || currentQtype;
+      const isOk = checkAnswer(answerStr, std, qt);
+      const disp = q.correct_answer_display || formatStandardDisplay(std, qt);
+      if (isOk) roundCorrect += 1;
+      paintFeedback(isOk, disp, q.explanation);
+      bumpStatsOptimistic(q.status, isOk);
+    }
+
+    fetchJSON("/api/answer", {
       method: "POST",
       body: JSON.stringify({ qid, answer: answerStr }),
-    });
-
-    if (res.correct) roundCorrect += 1;
-
-    els.feedback.hidden = false;
-    els.feedback.classList.toggle("ok", res.correct);
-    els.feedback.classList.toggle("bad", !res.correct);
-    const disp = res.correct_answer_display || res.correct_answer;
-    els.feedbackMsg.textContent = res.correct
-      ? `回答正确。正确答案：${disp}`
-      : `回答错误。正确答案：${disp}`;
-    const ex = (res.explanation || "").trim();
-    els.feedbackExplain.textContent = ex && ex !== "无" ? `解析：${ex}` : "";
-
-    els.btnNext.disabled = false;
-    loadStats().catch(() => {});
+    })
+      .then((res) => {
+        if (!canGradeLocally) {
+          if (res.correct) roundCorrect += 1;
+          const disp = res.correct_answer_display || res.correct_answer;
+          paintFeedback(res.correct, disp, res.explanation);
+        }
+        if (res.stats) applyStats(res.stats);
+      })
+      .catch((e) => {
+        if (!canGradeLocally) {
+          answered = false;
+          els.choices.querySelectorAll(".choice").forEach((b) => {
+            b.disabled = false;
+            b.classList.remove("picked");
+          });
+          if (currentQtype === "multi") els.btnConfirmMulti.hidden = false;
+        }
+        showError(e.message || String(e));
+      });
   }
 
   function showQuestion() {
@@ -330,7 +439,9 @@
     const cur = idx + 1;
 
     const qid = roundIds[idx];
+    currentQuestion = null;
     return fetchJSON(`/api/question/${qid}`).then((q) => {
+      currentQuestion = q;
       els.questionText.textContent = q.content;
       els.qStatus.textContent = q.status === "未做" ? "未做" : q.status;
       const qn = q.question_number != null ? q.question_number : "";

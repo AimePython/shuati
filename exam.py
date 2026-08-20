@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import atexit
 import json
 import pandas as pd
 import random
 import os
 import re
 import sys
+import tempfile
+import threading
 
 
 def _is_pyinstaller() -> bool:
@@ -28,6 +31,23 @@ Q_SINGLE_END = 350
 Q_MULTI_START, Q_MULTI_END = 351, 550
 Q_JUDGE_START, Q_JUDGE_END = 551, 790
 ROUND_PLAN = {"single": 100, "multi": 30, "judge": 40}
+
+def _atomic_dataframe_to_csv(df: pd.DataFrame, path: str) -> None:
+    """先写临时文件再替换，避免写到一半进程被杀导致进度文件损坏。"""
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp_csv_", suffix=".csv", dir=directory)
+    try:
+        os.close(fd)
+        df.to_csv(tmp, index=False, encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 
 def _resolve_path(path: str) -> str:
     if os.path.isabs(path):
@@ -365,8 +385,13 @@ class QuestionBank:
         self.progress_path = _resolve_path(progress_path)
         self.wrong_book_path = _resolve_path(wrong_book_path)
         self.quiet = quiet
+        self._state_lock = threading.Lock()
+        self._dirty_progress = False
+        self._dirty_wrong = False
+        self._flush_timer: threading.Timer | None = None
         self.df = self.load_progress()
         self.wrong_book = self.load_wrong_book()
+        atexit.register(self.flush_to_disk)
         self.total_questions = len(self.df)
         if not self.quiet:
             self.show_overall_progress()
@@ -385,13 +410,47 @@ class QuestionBank:
         df = _prepare_question_dataframe(df, type_by_number=self.type_by_number)
         df["status"] = "未做"
         df["question_index"] = range(len(df))
-        self.save_progress(df)
+        self.save_progress(df, immediate=True)
         return df
 
-    def save_progress(self, df=None):
-        if df is None:
-            df = self.df
-        df.to_csv(self.progress_path, index=False, encoding="utf-8")
+    def save_progress(self, df=None, *, immediate: bool = False):
+        with self._state_lock:
+            if df is not None:
+                self.df = df
+            self._dirty_progress = True
+        if immediate:
+            self.flush_to_disk()
+        else:
+            self._schedule_flush()
+
+    def _schedule_flush(self) -> None:
+        with self._state_lock:
+            if self._flush_timer is not None:
+                return
+            timer = threading.Timer(0.25, self.flush_to_disk)
+            timer.daemon = True
+            self._flush_timer = timer
+            timer.start()
+
+    def flush_to_disk(self) -> None:
+        """把内存中的进度/错题本写到磁盘。答题热路径不调用（后台定时或退出时刷盘）。"""
+        with self._state_lock:
+            timer = self._flush_timer
+            self._flush_timer = None
+            if timer is not None:
+                try:
+                    timer.cancel()
+                except Exception:
+                    pass
+            dirty_progress = self._dirty_progress
+            dirty_wrong = self._dirty_wrong
+            self._dirty_progress = False
+            self._dirty_wrong = False
+            if dirty_progress:
+                _atomic_dataframe_to_csv(self.df, self.progress_path)
+            if dirty_wrong:
+                wb = pd.DataFrame({"question_index": sorted(self.wrong_book)})
+                _atomic_dataframe_to_csv(wb, self.wrong_book_path)
 
     def load_wrong_book(self) -> set[int]:
         if not os.path.exists(self.wrong_book_path):
@@ -409,26 +468,37 @@ class QuestionBank:
         except Exception:
             return set()
 
-    def save_wrong_book(self) -> None:
-        ids = sorted(self.wrong_book)
-        wb = pd.DataFrame({"question_index": ids})
-        wb.to_csv(self.wrong_book_path, index=False, encoding="utf-8")
+    def save_wrong_book(self, *, immediate: bool = False) -> None:
+        with self._state_lock:
+            self._dirty_wrong = True
+        if immediate:
+            self.flush_to_disk()
+        else:
+            self._schedule_flush()
 
     def record_wrong_question(self, q_idx: int) -> None:
-        if int(q_idx) not in self.wrong_book:
-            self.wrong_book.add(int(q_idx))
-            self.save_wrong_book()
+        qid = int(q_idx)
+        with self._state_lock:
+            if qid in self.wrong_book:
+                return
+            self.wrong_book.add(qid)
+            self._dirty_wrong = True
+        self._schedule_flush()
 
     def clear_wrong_book(self) -> int:
-        n = len(self.wrong_book)
-        self.wrong_book = set()
-        self.save_wrong_book()
+        with self._state_lock:
+            n = len(self.wrong_book)
+            self.wrong_book = set()
+            self._dirty_wrong = True
+        self.flush_to_disk()
         return n
 
     def update_question_status(self, q_idx, is_correct):
-        idx = self.df[self.df["question_index"] == q_idx].index[0]
-        self.df.at[idx, "status"] = "正确" if is_correct else "错误"
-        self.save_progress()
+        with self._state_lock:
+            idx = self.df[self.df["question_index"] == q_idx].index[0]
+            self.df.at[idx, "status"] = "正确" if is_correct else "错误"
+            self._dirty_progress = True
+        self._schedule_flush()
 
     def _pick_questions_by_type(self, qtype: str, target: int) -> list[int]:
         """按题型抽题：错题优先，其次未做，再补正确题，最后打乱。"""
