@@ -65,6 +65,7 @@
   let currentRoundMode = "normal";
   let currentPaperName = "";
   let currentQuestion = null;
+  let questionLoadSeq = 0;
 
   function refreshRoundModeUI() {
     const isWrong = currentRoundMode === "wrong";
@@ -243,6 +244,23 @@
     els.btnNext.disabled = false;
   }
 
+  function clearFeedback() {
+    els.feedback.hidden = true;
+    els.feedback.classList.remove("ok", "bad");
+    els.feedbackMsg.textContent = "";
+    els.feedbackExplain.textContent = "";
+  }
+
+  function resetQuestionSurface(loadingText) {
+    answered = false;
+    clearFeedback();
+    els.btnNext.disabled = true;
+    clearChoices();
+    els.qStatus.textContent = "";
+    els.questionText.textContent = loadingText || "";
+    currentQuestion = null;
+  }
+
   function markPickedChoices(answerStr) {
     const picked = new Set(String(answerStr).toUpperCase().split(""));
     els.choices.querySelectorAll(".choice").forEach((b) => {
@@ -391,6 +409,7 @@
     els.btnConfirmMulti.hidden = true;
 
     const qid = roundIds[idx];
+    const submittedIdx = idx;
     const q = currentQuestion;
     const std = q && q.standard_answer != null ? String(q.standard_answer) : "";
     const canGradeLocally = Boolean(q && std);
@@ -408,7 +427,12 @@
       body: JSON.stringify({ qid, answer: answerStr }),
     })
       .then((res) => {
-        if (!canGradeLocally) {
+        const stillOnSame =
+          idx === submittedIdx &&
+          roundIds[idx] === qid &&
+          currentQuestion &&
+          Number(currentQuestion.qid) === Number(qid);
+        if (!canGradeLocally && stillOnSame) {
           if (res.correct) roundCorrect += 1;
           const disp = res.correct_answer_display || res.correct_answer;
           paintFeedback(res.correct, disp, res.explanation);
@@ -416,7 +440,12 @@
         if (res.stats) applyStats(res.stats);
       })
       .catch((e) => {
-        if (!canGradeLocally) {
+        const stillOnSame =
+          idx === submittedIdx &&
+          roundIds[idx] === qid &&
+          currentQuestion &&
+          Number(currentQuestion.qid) === Number(qid);
+        if (!canGradeLocally && stillOnSame) {
           answered = false;
           els.choices.querySelectorAll(".choice").forEach((b) => {
             b.disabled = false;
@@ -429,18 +458,18 @@
   }
 
   function showQuestion() {
-    answered = false;
-    els.feedback.hidden = true;
-    els.feedback.classList.remove("ok", "bad");
-    els.btnNext.disabled = true;
-    clearChoices();
-
+    const seq = ++questionLoadSeq;
     const total = roundIds.length;
     const cur = idx + 1;
-
     const qid = roundIds[idx];
-    currentQuestion = null;
+    resetQuestionSurface("加载中…");
+    els.quizProgress.textContent =
+      currentRoundMode === "paper"
+        ? `${currentPaperName ? `${currentPaperName} · ` : ""}第 ${cur} / ${total} 题`
+        : `第 ${cur} / ${total} 题`;
+
     return fetchJSON(`/api/question/${qid}`).then((q) => {
+      if (seq !== questionLoadSeq) return;
       currentQuestion = q;
       els.questionText.textContent = q.content;
       els.qStatus.textContent = q.status === "未做" ? "未做" : q.status;
@@ -457,6 +486,7 @@
   }
 
   function finishRound() {
+    questionLoadSeq += 1;
     const score = roundCorrect * 2;
     els.sumScore.textContent = String(score);
     els.sumCorrect.textContent = String(roundCorrect);
@@ -586,6 +616,7 @@
   });
 
   els.btnAbort.addEventListener("click", () => {
+    questionLoadSeq += 1;
     els.quizPanel.hidden = true;
     els.startPanel.hidden = false;
     loadStats().catch(() => {});

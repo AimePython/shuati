@@ -649,12 +649,20 @@
     return bank.find((r) => r.qid === qid);
   }
 
-  function showQuestion() {
-    answered = false;
+  function clearFeedback() {
     els.feedback.hidden = true;
     els.feedback.classList.remove("ok", "bad");
+    els.feedbackMsg.textContent = "";
+    els.feedbackExplain.textContent = "";
+  }
+
+  function showQuestion() {
+    answered = false;
+    clearFeedback();
     els.btnNext.disabled = true;
     clearChoices();
+    els.qStatus.textContent = "";
+    els.questionText.textContent = "";
 
     const total = roundIds.length;
     const cur = idx + 1;
