@@ -26,6 +26,11 @@
     bankList: $("bank-list"),
     btnStart: $("btn-start"),
     btnStartWrong: $("btn-start-wrong"),
+    btnStartPaper: $("btn-start-paper"),
+    paperPicker: $("paper-picker"),
+    paperSelect: $("paper-select"),
+    paperHint: $("paper-hint"),
+    btnPaperGo: $("btn-paper-go"),
     modeTag: $("mode-tag"),
     wrongBookCount: $("wrong-book-count"),
     btnClearWrongBook: $("btn-clear-wrong-book"),
@@ -58,14 +63,18 @@
   let multiPicked = null;
   let currentQtype = "single";
   let currentRoundMode = "normal";
+  let currentPaperName = "";
 
   function refreshRoundModeUI() {
     const isWrong = currentRoundMode === "wrong";
+    const isPaper = currentRoundMode === "paper";
     if (els.modeTag) {
-      els.modeTag.textContent = isWrong ? "错题重刷" : "普通刷题";
+      els.modeTag.textContent = isWrong ? "错题重刷" : isPaper ? "按样卷顺序" : "普通刷题";
     }
-    els.btnStart.classList.toggle("primary", !isWrong);
+    els.btnStart.classList.toggle("primary", !isWrong && !isPaper);
     els.btnStartWrong.classList.toggle("primary", isWrong);
+    if (els.btnStartPaper) els.btnStartPaper.classList.toggle("primary", isPaper);
+    if (els.paperPicker) els.paperPicker.hidden = !isPaper;
   }
 
   async function fetchJSON(url, options) {
@@ -183,6 +192,7 @@
       });
       applyStats(data);
       await loadBanks();
+      await loadPapers();
       els.quizPanel.hidden = true;
       els.summaryPanel.hidden = true;
       els.startPanel.hidden = false;
@@ -327,6 +337,10 @@
       els.quizProgress.textContent = qn
         ? `第 ${cur} / ${total} 题（全库第 ${qn} 题）`
         : `第 ${cur} / ${total} 题`;
+      if (currentRoundMode === "paper") {
+        const name = currentPaperName ? `${currentPaperName} · ` : "";
+        els.quizProgress.textContent = `${name}第 ${cur} / ${total} 题`;
+      }
       renderChoices(q);
     });
   }
@@ -340,21 +354,60 @@
     loadStats().catch(() => {});
   }
 
-  async function startRound(mode) {
+  async function loadPapers() {
+    if (!els.paperSelect) return;
+    try {
+      const data = await fetchJSON("/api/papers");
+      const papers = data.papers || [];
+      const prev = els.paperSelect.value;
+      els.paperSelect.innerHTML = "";
+      papers.forEach((p) => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = `${p.name}（${p.count} 题）`;
+        els.paperSelect.appendChild(opt);
+      });
+      if (prev && papers.some((p) => p.id === prev)) {
+        els.paperSelect.value = prev;
+      }
+      if (els.paperHint) {
+        if (!papers.length) {
+          els.paperHint.textContent = "当前题库没有可顺序练习的套卷。";
+        } else if (data.bank_id === "zhongji") {
+          els.paperHint.textContent = "中级工题库按全库题号从第 1 题做到最后一题。";
+        } else {
+          els.paperHint.textContent = `共 ${papers.length} 套，按原卷顺序从头做到尾。`;
+        }
+      }
+      if (els.btnPaperGo) els.btnPaperGo.disabled = !papers.length;
+    } catch (e) {
+      if (els.paperHint) els.paperHint.textContent = e.message || String(e);
+      if (els.btnPaperGo) els.btnPaperGo.disabled = true;
+    }
+  }
+
+  async function startRound(mode, paperId) {
     clearError();
     try {
+      const body = { mode };
+      if (mode === "paper") {
+        body.paper_id = paperId || (els.paperSelect && els.paperSelect.value) || "";
+      }
       const data = await fetchJSON("/api/round/start", {
         method: "POST",
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify(body),
       });
       roundIds = data.question_ids;
       idx = 0;
       roundCorrect = 0;
       currentRoundMode = data.mode || mode || "normal";
+      currentPaperName = data.paper_name || "";
       refreshRoundModeUI();
       if (!roundIds.length) {
         if (currentRoundMode === "wrong") {
           showError("当前错题集为空，暂无可重刷题目。");
+        } else if (currentRoundMode === "paper") {
+          showError("该套卷没有题目。");
         } else {
           showError("没有可抽取的题目（请检查题库与进度）。");
         }
@@ -380,6 +433,21 @@
     refreshRoundModeUI();
     startRound("wrong");
   });
+
+  if (els.btnStartPaper) {
+    els.btnStartPaper.addEventListener("click", () => {
+      currentRoundMode = "paper";
+      refreshRoundModeUI();
+      loadPapers();
+    });
+  }
+  if (els.btnPaperGo) {
+    els.btnPaperGo.addEventListener("click", () => {
+      currentRoundMode = "paper";
+      refreshRoundModeUI();
+      startRound("paper");
+    });
+  }
 
   els.btnClearWrongBook.addEventListener("click", async () => {
     clearError();
@@ -443,6 +511,7 @@
       setLoggedInState(res.username || username, Boolean(res.is_admin));
       els.authPassword.value = "";
       await loadBanks();
+      await loadPapers();
       await loadStats();
     } catch (e) {
       showError(e.message || String(e));
@@ -469,6 +538,7 @@
       if (me.logged_in) {
         setLoggedInState(me.username || "", Boolean(me.is_admin));
         await loadBanks();
+        await loadPapers();
         await loadStats();
       }
     } catch (e) {

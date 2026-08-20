@@ -65,6 +65,17 @@ def export_bank(bank_id: str) -> tuple[dict, list[dict]]:
         "bank_id": bank_id,
         "bank_name": b.bank_name,
         "exported_by": "export_bank_for_pages.py",
+        "papers": [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "count": int(p.get("count") or 0),
+                "pack": p.get("pack") or "",
+                "set_no": int(p.get("set_no") or 0),
+                "question_ids": list(p.get("question_ids") or []),
+            }
+            for p in b.list_papers(include_ids=True)
+        ],
         "questions": questions,
     }
     info = {
@@ -73,6 +84,10 @@ def export_bank(bank_id: str) -> tuple[dict, list[dict]]:
         "short_name": meta["short_name"],
         "file": f"questions_{bank_id}.json",
         "count": len(questions),
+        "papers": [
+            {"id": p["id"], "name": p["name"], "count": int(p.get("count") or 0)}
+            for p in b.list_papers(include_ids=False)
+        ],
     }
     return info, payload
 

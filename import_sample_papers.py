@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""从「电力交易员/样卷2、样卷3」PDF 解析题目，生成 banks/erji.xlsx 与 banks/sanji.xlsx。"""
+"""从「电力交易员/样卷2、样卷3」PDF 解析题目，生成 banks/erji.xlsx、banks/sanji.xlsx 与套卷目录。
+
+默认：已有 xlsx 时不改写（避免打乱 question_index），只根据现有题库匹配并写入 banks/papers.json。
+重建题库：python3 import_sample_papers.py --rebuild-xlsx
+"""
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import fitz
@@ -29,6 +34,8 @@ TYPE_MAP = {"单选题": "single", "多选题": "multi", "判断题": "judge"}
 EXPECTED = {"single": 100, "multi": 30, "judge": 40}
 
 LEVEL_FROM_NAME = re.compile(r"电力交易员---(二级|三级)")
+SET_NO_RE = re.compile(r"第(\d+)套")
+LEVEL_TO_BANK = {"二级": "erji", "三级": "sanji"}
 
 
 def _clean_lines(text: str) -> str:
@@ -183,6 +190,151 @@ def to_excel(rows: list[dict], path: Path) -> None:
     df.to_excel(path, index=False)
 
 
+def _option_tuple(row: dict | pd.Series) -> tuple[str, ...]:
+    return tuple(
+        _norm_space(str(row.get(c, "") or ""))
+        for c in ("选项 A", "选项 B", "选项 C", "选项 D", "选项E")
+    )
+
+
+def question_fp(row: dict | pd.Series) -> str:
+    return "|".join(
+        [
+            str(row.get("题目类型", "") or ""),
+            _norm_space(str(row.get("题干", "") or "")),
+            *_option_tuple(row),
+        ]
+    )
+
+
+def stem_fp(row: dict | pd.Series) -> str:
+    return "|".join(
+        [
+            str(row.get("题目类型", "") or ""),
+            _norm_space(str(row.get("题干", "") or "")),
+        ]
+    )
+
+
+def pack_label(path: Path) -> str:
+    name = path.parent.name
+    return name if name.startswith("样卷") else name
+
+
+def pack_slug(pack: str) -> str:
+    if "3" in pack:
+        return "yangjuan3"
+    return "yangjuan2"
+
+
+def paper_identity(path: Path, level: str) -> dict:
+    pack = pack_label(path)
+    m = SET_NO_RE.search(path.stem)
+    set_no = int(m.group(1)) if m else 0
+    bank_id = LEVEL_TO_BANK[level]
+    pid = f"{bank_id}-{pack_slug(pack)}-{set_no:02d}"
+    return {
+        "id": pid,
+        "bank_id": bank_id,
+        "name": f"{pack}-{level}-第{set_no}套",
+        "pack": pack,
+        "set_no": set_no,
+        "source_file": path.relative_to(PDF_ROOT).as_posix(),
+    }
+
+
+def _bank_indexes(df: pd.DataFrame) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
+    fp_map: dict[str, list[int]] = defaultdict(list)
+    stem_map: dict[str, list[int]] = defaultdict(list)
+    for i, row in df.iterrows():
+        idx = int(i)
+        fp_map[question_fp(row)].append(idx)
+        stem_map[stem_fp(row)].append(idx)
+    return fp_map, stem_map
+
+
+def match_question(
+    q: dict,
+    df: pd.DataFrame,
+    fp_map: dict[str, list[int]],
+    stem_map: dict[str, list[int]],
+) -> int | None:
+    hits = fp_map.get(question_fp(q)) or []
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        return hits[0]
+    stems = stem_map.get(stem_fp(q)) or []
+    if not stems:
+        return None
+    if len(stems) == 1:
+        return stems[0]
+    qopts = _option_tuple(q)
+    best_i = stems[0]
+    best_score = -1
+    for i in stems:
+        bopts = _option_tuple(df.iloc[i])
+        score = sum(1 for a, b in zip(qopts, bopts) if a and a == b)
+        if score > best_score:
+            best_score = score
+            best_i = i
+    return best_i
+
+
+def build_papers_catalog(parsed_papers: list[tuple[Path, str, list[dict]]]) -> list[dict]:
+    banks: dict[str, pd.DataFrame] = {}
+    indexes: dict[str, tuple[dict[str, list[int]], dict[str, list[int]]]] = {}
+    for slug in ("erji", "sanji"):
+        path = OUT_DIR / f"{slug}.xlsx"
+        if not path.is_file():
+            continue
+        df = pd.read_excel(path)
+        banks[slug] = df
+        indexes[slug] = _bank_indexes(df)
+
+    papers: list[dict] = []
+    for pdf, level, qs in parsed_papers:
+        meta = paper_identity(pdf, level)
+        slug = meta["bank_id"]
+        df = banks.get(slug)
+        if df is None:
+            print(f"⚠ 找不到题库 {slug}.xlsx，跳过套卷 {meta['name']}")
+            continue
+        fp_map, stem_map = indexes[slug]
+        qids: list[int] = []
+        missed = 0
+        for q in qs:
+            matched = match_question(q, df, fp_map, stem_map)
+            if matched is None:
+                missed += 1
+                continue
+            qids.append(int(matched))
+        paper = {
+            **meta,
+            "count": len(qids),
+            "parsed_count": len(qs),
+            "unmatched": missed,
+            "question_ids": qids,
+        }
+        papers.append(paper)
+        flag = "" if missed == 0 and len(qids) == len(qs) else " ⚠"
+        print(
+            f"  套卷 {meta['name']}: 解析 {len(qs)} → 匹配 {len(qids)} "
+            f"（未匹配 {missed}）{flag}"
+        )
+
+    papers.sort(key=lambda p: (p["bank_id"], p["pack"], p["set_no"], p["id"]))
+    return papers
+
+
+def write_papers_json(papers: list[dict]) -> Path:
+    path = OUT_DIR / "papers.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": 1, "papers": papers}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def main() -> int:
     if not PDF_ROOT.is_dir():
         print(f"❌ 找不到样卷目录：{PDF_ROOT}", file=sys.stderr)
@@ -192,7 +344,9 @@ def main() -> int:
         print("❌ 没有 PDF", file=sys.stderr)
         return 1
 
+    rebuild_xlsx = "--rebuild-xlsx" in sys.argv
     by_level: dict[str, list[dict]] = {"二级": [], "三级": []}
+    parsed_papers: list[tuple[Path, str, list[dict]]] = []
     paper_stats = []
     for pdf in pdfs:
         level = level_of(pdf)
@@ -201,7 +355,6 @@ def main() -> int:
             continue
         qs = parse_pdf(pdf)
         counts = Counter(q["题目类型"] for q in qs)
-        missing_ans = 0
         paper_stats.append((pdf.relative_to(PDF_ROOT).as_posix(), counts, len(qs)))
         if counts != EXPECTED:
             print(
@@ -209,6 +362,7 @@ def main() -> int:
                 f"（期望 {EXPECTED}）"
             )
         by_level[level].extend(qs)
+        parsed_papers.append((pdf, level, qs))
 
     print("\n—— 各卷解析 ——")
     for name, counts, n in paper_stats:
@@ -216,27 +370,24 @@ def main() -> int:
         print(f"  {name}: {n} {dict(counts)}{flag}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    written = []
     for level, rows in by_level.items():
-        uniq = sort_by_type(dedupe(rows))
-        counts = Counter(q["题目类型"] for q in uniq)
         slug = "erji" if level == "二级" else "sanji"
         out = OUT_DIR / f"{slug}.xlsx"
+        if out.is_file() and not rebuild_xlsx:
+            print(f"\n↩ {level}: 保留已有 {out}（不改写 question_index）")
+            continue
+        uniq = sort_by_type(dedupe(rows))
+        counts = Counter(q["题目类型"] for q in uniq)
         to_excel(uniq, out)
-        written.append((level, out, len(rows), len(uniq), counts))
         print(
             f"\n✅ {level}: 原始 {len(rows)} 题 → 去重 {len(uniq)} 题 {dict(counts)}"
         )
         print(f"   写入 {out}")
 
-    empty_ans = [
-        (lv, i, r["题干"][:40])
-        for lv, rows in by_level.items()
-        for i, r in enumerate(sort_by_type(dedupe(rows)), 1)
-        if not r["标准答案"]
-    ]
-    if empty_ans:
-        print("\n⚠ 无答案题目：", empty_ans[:10])
+    print("\n—— 套卷匹配（按原卷顺序映射到现有题库）——")
+    papers = build_papers_catalog(parsed_papers)
+    papers_path = write_papers_json(papers)
+    print(f"\n✅ 写入 {papers_path}（{len(papers)} 套）")
     return 0
 
 

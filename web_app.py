@@ -567,6 +567,35 @@ def api_banks():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/papers")
+def api_papers():
+    try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
+        b = get_bank()
+        papers = []
+        for item in b.list_papers(include_ids=False):
+            papers.append(
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "count": int(item.get("count") or 0),
+                    "pack": item.get("pack") or "",
+                    "set_no": int(item.get("set_no") or 0),
+                }
+            )
+        return jsonify(
+            {
+                "ok": True,
+                "bank_id": b.bank_id,
+                "bank_name": b.bank_name,
+                "papers": papers,
+            }
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/bank", methods=["POST"])
 def api_select_bank():
     try:
@@ -599,12 +628,25 @@ def api_round_start():
         data = request.get_json(silent=True) or {}
         mode = str(data.get("mode", "normal")).strip().lower()
         b = get_bank()
+        paper_id = str(data.get("paper_id", "")).strip()
+        paper_name = ""
         if mode == "wrong":
             ids = b.get_wrong_questions()
+        elif mode == "paper":
+            try:
+                ids, paper = b.get_paper_questions(paper_id)
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            paper_name = str(paper.get("name") or "")
+            paper_id = str(paper.get("id") or paper_id)
         else:
             mode = "normal"
             ids = b.get_round_questions()
-        return jsonify({"ok": True, "mode": mode, "question_ids": ids, "count": len(ids)})
+        payload = {"ok": True, "mode": mode, "question_ids": ids, "count": len(ids)}
+        if mode == "paper":
+            payload["paper_id"] = paper_id
+            payload["paper_name"] = paper_name
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

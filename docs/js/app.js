@@ -29,6 +29,11 @@
     bankList: $("bank-list"),
     btnStart: $("btn-start"),
     btnStartWrong: $("btn-start-wrong"),
+    btnStartPaper: $("btn-start-paper"),
+    paperPicker: $("paper-picker"),
+    paperSelect: $("paper-select"),
+    paperHint: $("paper-hint"),
+    btnPaperGo: $("btn-paper-go"),
     modeTag: $("mode-tag"),
     wrongBookCount: $("wrong-book-count"),
     btnClearWrongBook: $("btn-clear-wrong-book"),
@@ -74,14 +79,20 @@
   let multiPicked = null;
   let currentQtype = "single";
   let currentRoundMode = "normal";
+  let currentPaperName = "";
+  /** @type {Array<{id:string,name:string,count?:number,question_ids?:number[]}>} */
+  let papersCatalog = [];
 
   function refreshRoundModeUI() {
     const isWrong = currentRoundMode === "wrong";
+    const isPaper = currentRoundMode === "paper";
     if (els.modeTag) {
-      els.modeTag.textContent = isWrong ? "错题重刷" : "普通刷题";
+      els.modeTag.textContent = isWrong ? "错题重刷" : isPaper ? "按样卷顺序" : "普通刷题";
     }
-    els.btnStart.classList.toggle("primary", !isWrong);
+    els.btnStart.classList.toggle("primary", !isWrong && !isPaper);
     els.btnStartWrong.classList.toggle("primary", isWrong);
+    if (els.btnStartPaper) els.btnStartPaper.classList.toggle("primary", isPaper);
+    if (els.paperPicker) els.paperPicker.hidden = !isPaper;
   }
 
   function progressStorageKey(username) {
@@ -500,6 +511,7 @@
     els.authPassword.value = "";
     refreshRoundModeUI();
     renderBankButtons();
+    renderPaperSelect();
   }
 
   function clearChoices() {
@@ -653,6 +665,10 @@
     els.quizProgress.textContent = qn
       ? `第 ${cur} / ${total} 题（全库第 ${qn} 题）`
       : `第 ${cur} / ${total} 题`;
+    if (currentRoundMode === "paper") {
+      const name = currentPaperName ? `${currentPaperName} · ` : "";
+      els.quizProgress.textContent = `${name}第 ${cur} / ${total} 题`;
+    }
     renderChoices(q);
     return Promise.resolve();
   }
@@ -666,20 +682,66 @@
     renderStats();
   }
 
-  function startRound(mode) {
+  function getPaperQuestions(paperId) {
+    const p = papersCatalog.find((x) => x.id === paperId);
+    if (!p) return [];
+    const valid = new Set(bank.map((r) => Number(r.qid)));
+    const raw = Array.isArray(p.question_ids) ? p.question_ids : [];
+    return raw.map((x) => Number(x)).filter((qid) => valid.has(qid));
+  }
+
+  function renderPaperSelect() {
+    if (!els.paperSelect) return;
+    const prev = els.paperSelect.value;
+    els.paperSelect.innerHTML = "";
+    papersCatalog.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      const n = Array.isArray(p.question_ids) ? p.question_ids.length : p.count || 0;
+      opt.textContent = `${p.name}（${n} 题）`;
+      els.paperSelect.appendChild(opt);
+    });
+    if (prev && papersCatalog.some((p) => p.id === prev)) {
+      els.paperSelect.value = prev;
+    }
+    if (els.paperHint) {
+      if (!papersCatalog.length) {
+        els.paperHint.textContent = "当前题库没有可顺序练习的套卷。";
+      } else if (currentBankId === "zhongji") {
+        els.paperHint.textContent = "中级工题库按全库题号从第 1 题做到最后一题。";
+      } else {
+        els.paperHint.textContent = `共 ${papersCatalog.length} 套，按原卷顺序从头做到尾。`;
+      }
+    }
+    if (els.btnPaperGo) els.btnPaperGo.disabled = !papersCatalog.length;
+  }
+
+  function startRound(mode, paperId) {
     if (!currentUser) {
       showError("请先登录");
       return;
     }
     clearError();
-    currentRoundMode = mode === "wrong" ? "wrong" : "normal";
+    currentRoundMode = mode === "wrong" ? "wrong" : mode === "paper" ? "paper" : "normal";
     refreshRoundModeUI();
-    roundIds = mode === "wrong" ? getWrongQuestions() : getRoundQuestions();
+    currentPaperName = "";
+    if (mode === "wrong") {
+      roundIds = getWrongQuestions();
+    } else if (mode === "paper") {
+      const pid = paperId || (els.paperSelect && els.paperSelect.value) || "";
+      const paper = papersCatalog.find((x) => x.id === pid);
+      currentPaperName = paper ? String(paper.name || "") : "";
+      roundIds = getPaperQuestions(pid);
+    } else {
+      roundIds = getRoundQuestions();
+    }
     idx = 0;
     roundCorrect = 0;
     if (!roundIds.length) {
       if (mode === "wrong") {
         showError("当前错题集为空，暂无可重刷题目。");
+      } else if (mode === "paper") {
+        showError("该套卷没有题目。");
       } else {
         showError("没有可抽取的题目（请检查题库与进度）。");
       }
@@ -698,6 +760,19 @@
   els.btnStartWrong.addEventListener("click", () => {
     startRound("wrong");
   });
+
+  if (els.btnStartPaper) {
+    els.btnStartPaper.addEventListener("click", () => {
+      currentRoundMode = "paper";
+      refreshRoundModeUI();
+      renderPaperSelect();
+    });
+  }
+  if (els.btnPaperGo) {
+    els.btnPaperGo.addEventListener("click", () => {
+      startRound("paper");
+    });
+  }
 
   els.btnClearWrongBook.addEventListener("click", () => {
     clearError();
@@ -914,6 +989,16 @@
     }
     currentBankId = meta.id;
     baseQuestions = base;
+    papersCatalog = Array.isArray(data.papers) ? data.papers : [];
+    if (!papersCatalog.length && meta.id === "zhongji") {
+      papersCatalog = [
+        {
+          id: "zhongji-all",
+          name: "按全库题号顺序",
+          question_ids: base.map((q) => q.qid),
+        },
+      ];
+    }
     questionsReady = true;
     try {
       localStorage.setItem(BANK_PREF_KEY, currentBankId);
@@ -929,6 +1014,7 @@
       await loadBankFile(bankId);
       rebuildBank();
       renderBankButtons();
+      renderPaperSelect();
       renderStats();
       els.quizPanel.hidden = true;
       els.summaryPanel.hidden = true;

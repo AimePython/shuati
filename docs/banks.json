@@ -7,21 +7,232 @@
       "name": "中级工题库",
       "short_name": "中级工",
       "file": "questions_zhongji.json",
-      "count": 790
+      "count": 790,
+      "papers": [
+        {
+          "id": "zhongji-all",
+          "name": "按全库题号顺序",
+          "count": 790
+        }
+      ]
     },
     {
       "id": "erji",
       "name": "电力交易员二级（样卷）",
       "short_name": "二级样卷",
       "file": "questions_erji.json",
-      "count": 2479
+      "count": 2479,
+      "papers": [
+        {
+          "id": "erji-yangjuan2-01",
+          "name": "样卷2-二级-第1套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-02",
+          "name": "样卷2-二级-第2套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-03",
+          "name": "样卷2-二级-第3套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-04",
+          "name": "样卷2-二级-第4套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-05",
+          "name": "样卷2-二级-第5套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-06",
+          "name": "样卷2-二级-第6套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-07",
+          "name": "样卷2-二级-第7套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-08",
+          "name": "样卷2-二级-第8套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-09",
+          "name": "样卷2-二级-第9套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan2-10",
+          "name": "样卷2-二级-第10套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-01",
+          "name": "样卷3-二级-第1套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-02",
+          "name": "样卷3-二级-第2套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-03",
+          "name": "样卷3-二级-第3套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-04",
+          "name": "样卷3-二级-第4套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-05",
+          "name": "样卷3-二级-第5套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-06",
+          "name": "样卷3-二级-第6套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-07",
+          "name": "样卷3-二级-第7套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-08",
+          "name": "样卷3-二级-第8套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-09",
+          "name": "样卷3-二级-第9套",
+          "count": 170
+        },
+        {
+          "id": "erji-yangjuan3-10",
+          "name": "样卷3-二级-第10套",
+          "count": 170
+        }
+      ]
     },
     {
       "id": "sanji",
       "name": "电力交易员三级（样卷）",
       "short_name": "三级样卷",
       "file": "questions_sanji.json",
-      "count": 2341
+      "count": 2341,
+      "papers": [
+        {
+          "id": "sanji-yangjuan2-01",
+          "name": "样卷2-三级-第1套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-02",
+          "name": "样卷2-三级-第2套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-03",
+          "name": "样卷2-三级-第3套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-04",
+          "name": "样卷2-三级-第4套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-05",
+          "name": "样卷2-三级-第5套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-06",
+          "name": "样卷2-三级-第6套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-07",
+          "name": "样卷2-三级-第7套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-08",
+          "name": "样卷2-三级-第8套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-09",
+          "name": "样卷2-三级-第9套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan2-10",
+          "name": "样卷2-三级-第10套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-01",
+          "name": "样卷3-三级-第1套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-02",
+          "name": "样卷3-三级-第2套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-03",
+          "name": "样卷3-三级-第3套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-04",
+          "name": "样卷3-三级-第4套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-05",
+          "name": "样卷3-三级-第5套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-06",
+          "name": "样卷3-三级-第6套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-07",
+          "name": "样卷3-三级-第7套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-08",
+          "name": "样卷3-三级-第8套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-09",
+          "name": "样卷3-三级-第9套",
+          "count": 170
+        },
+        {
+          "id": "sanji-yangjuan3-10",
+          "name": "样卷3-三级-第10套",
+          "count": 170
+        }
+      ]
     }
   ]
 }

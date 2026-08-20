@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pandas as pd
 import random
 import os
@@ -43,6 +44,9 @@ def _resolve_path(path: str) -> str:
 
 
 DEFAULT_BANK_ID = "zhongji"
+ZHONGJI_ALL_PAPER_ID = "zhongji-all"
+PAPERS_RELPATH = os.path.join("banks", "papers.json")
+_PAPERS_CACHE: list[dict] | None = None
 BANK_CATALOG = [
     {
         "id": "zhongji",
@@ -78,6 +82,45 @@ def get_bank_meta(bank_id: str | None) -> dict:
 
 def list_banks() -> list[dict]:
     return [dict(item) for item in BANK_CATALOG]
+
+
+def load_papers_catalog() -> list[dict]:
+    """读取 banks/papers.json（样卷题库的套卷 → 题号映射）。"""
+    global _PAPERS_CACHE
+    if _PAPERS_CACHE is not None:
+        return _PAPERS_CACHE
+    path = _resolve_path(PAPERS_RELPATH)
+    if not os.path.isfile(path):
+        _PAPERS_CACHE = []
+        return _PAPERS_CACHE
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        papers = data.get("papers") if isinstance(data, dict) else data
+        _PAPERS_CACHE = [dict(p) for p in papers] if isinstance(papers, list) else []
+    except Exception:
+        _PAPERS_CACHE = []
+    return _PAPERS_CACHE
+
+
+def get_paper_meta(paper_id: str) -> dict | None:
+    pid = str(paper_id or "").strip()
+    if not pid:
+        return None
+    if pid == ZHONGJI_ALL_PAPER_ID:
+        meta = get_bank_meta(DEFAULT_BANK_ID)
+        return {
+            "id": ZHONGJI_ALL_PAPER_ID,
+            "bank_id": meta["id"],
+            "name": "按全库题号顺序",
+            "pack": "",
+            "set_no": 0,
+            "source_file": "",
+        }
+    for item in load_papers_catalog():
+        if str(item.get("id", "")) == pid:
+            return dict(item)
+    return None
 
 
 def type_by_question_number(n: int) -> str:
@@ -418,6 +461,70 @@ class QuestionBank:
         wrong = [qid for qid in self.wrong_book if qid in valid]
         random.shuffle(wrong)
         return wrong
+
+    def _valid_index_set(self) -> set[int]:
+        return {int(x) for x in self.df["question_index"].tolist()}
+
+    def _ordered_all_ids(self) -> list[int]:
+        return [int(x) for x in self.df.sort_values("question_index")["question_index"].tolist()]
+
+    def _filter_paper_ids(self, raw_ids) -> list[int]:
+        valid = self._valid_index_set()
+        out: list[int] = []
+        for item in raw_ids or []:
+            try:
+                qid = int(item)
+            except (TypeError, ValueError):
+                continue
+            if qid in valid:
+                out.append(qid)
+        return out
+
+    def list_papers(self, *, include_ids: bool = False) -> list[dict]:
+        """当前题库可顺序练习的套卷。中级工为「按全库题号顺序」。"""
+        if self.type_by_number or self.bank_id == DEFAULT_BANK_ID:
+            ids = self._ordered_all_ids()
+            item = {
+                "id": ZHONGJI_ALL_PAPER_ID,
+                "bank_id": self.bank_id,
+                "name": "按全库题号顺序",
+                "pack": "",
+                "set_no": 0,
+                "count": len(ids),
+            }
+            if include_ids:
+                item["question_ids"] = ids
+            return [item]
+
+        papers = []
+        for raw in load_papers_catalog():
+            if str(raw.get("bank_id", "")) != self.bank_id:
+                continue
+            ids = self._filter_paper_ids(raw.get("question_ids"))
+            item = {
+                "id": str(raw.get("id", "")),
+                "bank_id": self.bank_id,
+                "name": str(raw.get("name") or raw.get("id") or "未命名套卷"),
+                "pack": str(raw.get("pack") or ""),
+                "set_no": int(raw.get("set_no") or 0),
+                "source_file": str(raw.get("source_file") or ""),
+                "count": len(ids),
+            }
+            if include_ids:
+                item["question_ids"] = ids
+            papers.append(item)
+        papers.sort(key=lambda p: (p.get("pack") or "", p.get("set_no") or 0, p.get("id") or ""))
+        return papers
+
+    def get_paper_questions(self, paper_id: str) -> tuple[list[int], dict]:
+        """按套卷原题顺序返回 question_index，不打乱。"""
+        pid = str(paper_id or "").strip()
+        papers = {p["id"]: p for p in self.list_papers(include_ids=True)}
+        if pid not in papers:
+            raise ValueError("未知套卷，或当前题库没有该套卷")
+        meta = papers[pid]
+        ids = list(meta.get("question_ids") or [])
+        return ids, meta
 
     def get_stats(self):
         total = len(self.df)
