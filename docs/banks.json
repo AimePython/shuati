@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "default": "zhongji",
+  "banks": [
+    {
+      "id": "zhongji",
+      "name": "中级工题库",
+      "short_name": "中级工",
+      "file": "questions_zhongji.json",
+      "count": 790
+    },
+    {
+      "id": "erji",
+      "name": "电力交易员二级（样卷）",
+      "short_name": "二级样卷",
+      "file": "questions_erji.json",
+      "count": 2479
+    },
+    {
+      "id": "sanji",
+      "name": "电力交易员三级（样卷）",
+      "short_name": "三级样卷",
+      "file": "questions_sanji.json",
+      "count": 2341
+    }
+  ]
+}

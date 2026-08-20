@@ -25,7 +25,17 @@ from threading import Lock
 from flask import Flask, jsonify, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from exam import QuestionBank, check_answer, format_standard_display, _type_label
+from exam import (
+    QuestionBank,
+    check_answer,
+    format_standard_display,
+    _type_label,
+    DEFAULT_BANK_ID,
+    get_bank_meta,
+    list_banks,
+    hint_for_type,
+    option_letters_for_row,
+)
 
 
 def _bundle_dir() -> str:
@@ -41,11 +51,19 @@ app = Flask(
     static_folder=os.path.join(_bundle_dir(), "static"),
 )
 app.secret_key = os.environ.get("SECRET_KEY", "please-change-this-secret-key")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+if os.environ.get("RENDER"):
+    app.config["SESSION_COOKIE_SECURE"] = True
 _bank_by_user: dict[str, QuestionBank] = {}
 _bank_lock = Lock()
 
 
 def _data_dir() -> str:
+    env = os.environ.get("DATA_DIR", "").strip()
+    if env:
+        os.makedirs(env, exist_ok=True)
+        return env
     return os.path.dirname(os.path.abspath(__file__))
 
 
@@ -83,12 +101,20 @@ def _valid_username(username: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9_]{3,32}", username))
 
 
-def _user_progress_path(username: str) -> str:
-    return os.path.join(_progress_dir(), f"{username}.csv")
+def _user_progress_path(username: str, bank_id: str) -> str:
+    if bank_id == DEFAULT_BANK_ID:
+        legacy = os.path.join(_progress_dir(), f"{username}.csv")
+        if os.path.exists(legacy):
+            return legacy
+    return os.path.join(_progress_dir(), f"{username}__{bank_id}.csv")
 
 
-def _user_wrong_book_path(username: str) -> str:
-    return os.path.join(_progress_dir(), f"{username}_wrong_book.csv")
+def _user_wrong_book_path(username: str, bank_id: str) -> str:
+    if bank_id == DEFAULT_BANK_ID:
+        legacy = os.path.join(_progress_dir(), f"{username}_wrong_book.csv")
+        if os.path.exists(legacy):
+            return legacy
+    return os.path.join(_progress_dir(), f"{username}__{bank_id}_wrong_book.csv")
 
 
 def _current_user() -> str | None:
@@ -96,19 +122,32 @@ def _current_user() -> str | None:
     return str(u) if u else None
 
 
+def _current_bank_id() -> str:
+    bid = str(session.get("bank_id") or DEFAULT_BANK_ID).strip()
+    try:
+        return get_bank_meta(bid)["id"]
+    except Exception:
+        return DEFAULT_BANK_ID
+
+
 def get_bank() -> QuestionBank:
     user = _current_user()
     if not user:
         raise PermissionError("未登录")
+    bank_id = _current_bank_id()
+    key = f"{user}::{bank_id}"
     with _bank_lock:
-        bank = _bank_by_user.get(user)
+        bank = _bank_by_user.get(key)
         if bank is None:
+            meta = get_bank_meta(bank_id)
             bank = QuestionBank(
-                progress_path=_user_progress_path(user),
-                wrong_book_path=_user_wrong_book_path(user),
+                excel_path=meta["excel"],
+                progress_path=_user_progress_path(user, bank_id),
+                wrong_book_path=_user_wrong_book_path(user, bank_id),
                 quiet=True,
+                bank_id=bank_id,
             )
-            _bank_by_user[user] = bank
+            _bank_by_user[key] = bank
         return bank
 
 
@@ -180,9 +219,68 @@ def api_stats():
         if not _current_user():
             return jsonify({"ok": False, "error": "未登录"}), 401
         b = get_bank()
-        return jsonify({"ok": True, **b.get_stats()})
+        return jsonify(
+            {
+                "ok": True,
+                "bank_id": b.bank_id,
+                "bank_name": b.bank_name,
+                **b.get_stats(),
+            }
+        )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "detail": traceback.format_exc()}), 500
+
+
+@app.route("/api/banks")
+def api_banks():
+    try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
+        current = _current_bank_id()
+        banks = []
+        for meta in list_banks():
+            banks.append(
+                {
+                    "id": meta["id"],
+                    "name": meta["name"],
+                    "short_name": meta["short_name"],
+                    "current": meta["id"] == current,
+                }
+            )
+        return jsonify(
+            {
+                "ok": True,
+                "bank_id": current,
+                "bank_name": get_bank_meta(current)["name"],
+                "banks": banks,
+            }
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/bank", methods=["POST"])
+def api_select_bank():
+    try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
+        data = request.get_json(silent=True) or {}
+        bid = str(data.get("bank_id", "")).strip()
+        known = {m["id"] for m in list_banks()}
+        if bid not in known:
+            return jsonify({"ok": False, "error": "未知题库"}), 400
+        session["bank_id"] = bid
+        b = get_bank()
+        return jsonify(
+            {
+                "ok": True,
+                "bank_id": b.bank_id,
+                "bank_name": b.bank_name,
+                **b.get_stats(),
+            }
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/round/start", methods=["POST"])
@@ -215,11 +313,7 @@ def api_question(qid: int):
         row = sub.iloc[0]
         qt = str(row["题目类型"])
         qnum = int(row["question_index"]) + 1
-        hints = {
-            "single": "单选题（全库第 1–350 题）：四选一",
-            "multi": "多选题（全库第 351–550 题，选项 A–E）：须选中全部正确选项，选好后点「确认答案」；提交后显示正确答案",
-            "judge": "判断题（全库第 551–790 题）：选对（A/对）或错（B/错）",
-        }
+        letters = option_letters_for_row(row, qt)
         return jsonify(
             {
                 "ok": True,
@@ -229,8 +323,9 @@ def api_question(qid: int):
                 "status": str(row["status"]),
                 "question_type": qt,
                 "type_label": _type_label(qt),
-                "hint": hints.get(qt, ""),
-                "multi_option_count": 5 if qt == "multi" else None,
+                "hint": hint_for_type(qt, type_by_number=b.type_by_number),
+                "option_letters": letters,
+                "multi_option_count": len(letters) if qt == "multi" else None,
             }
         )
     except Exception as e:
@@ -303,7 +398,9 @@ def _pick_free_port(preferred: int, host: str, span: int = 30) -> int:
 
 if __name__ == "__main__":
     # 默认 127.0.0.1：避免仅本机使用时 0.0.0.0 + VPN/多网卡导致浏览器连不上
-    host = os.environ.get("HOST", "127.0.0.1")
+    host = os.environ.get("HOST")
+    if not host:
+        host = "0.0.0.0" if os.environ.get("RENDER") else "127.0.0.1"
     preferred = int(os.environ.get("PORT", "5001"))
     frozen = getattr(sys, "frozen", False)
     port = _pick_free_port(preferred, host)
@@ -317,7 +414,7 @@ if __name__ == "__main__":
     print(f"→ 自检：http://127.0.0.1:{port}/health\n")
     if frozen:
         print("题库请放在本程序同一文件夹内（默认文件名见 exam.py）。\n")
-    if os.environ.get("NO_BROWSER") != "1":
+    if os.environ.get("NO_BROWSER") != "1" and not os.environ.get("RENDER"):
 
         def _open_browser() -> None:
             time.sleep(1.0)

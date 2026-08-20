@@ -28,6 +28,7 @@ def main() -> int:
     datas = [
         f"--add-data=templates{sep}templates",
         f"--add-data=static{sep}static",
+        f"--add-data=banks{sep}banks",
     ]
     hidden = [
         "--hidden-import=openpyxl",
@@ -67,6 +68,17 @@ def main() -> int:
         return r.returncode
 
     dist_dir = ROOT / "dist" / APP_NAME
+    xlsx = ROOT / "电力交易员中级工题库2025(2).xlsx"
+    if xlsx.is_file() and dist_dir.is_dir():
+        shutil.copy2(xlsx, dist_dir / xlsx.name)
+        print(f"已复制 {xlsx.name} 到 {dist_dir}")
+    banks_src = ROOT / "banks"
+    if banks_src.is_dir() and dist_dir.is_dir():
+        dest = dist_dir / "banks"
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(banks_src, dest)
+        print(f"已复制 banks/ 到 {dist_dir}")
     note = ROOT / "安装说明.txt"
     if note.is_file() and dist_dir.is_dir():
         shutil.copy2(note, dist_dir / note.name)

@@ -22,6 +22,9 @@
     whoami: $("whoami"),
     whoamiName: $("whoami-name"),
     btnLogout: $("btn-logout"),
+    bankPanel: $("bank-panel"),
+    bankName: $("bank-name"),
+    bankList: $("bank-list"),
     btnStart: $("btn-start"),
     btnStartWrong: $("btn-start-wrong"),
     modeTag: $("mode-tag"),
@@ -56,6 +59,10 @@
   let wrongBook = new Set();
   let currentUser = "";
   let questionsReady = false;
+  let currentBankId = "zhongji";
+  /** @type {Array<{id:string,name:string,short_name?:string,file:string}>} */
+  let banksCatalog = [];
+  const BANK_PREF_KEY = "dl_trader_pages_bank_v1";
 
   let roundIds = [];
   let idx = 0;
@@ -76,7 +83,9 @@
   }
 
   function progressStorageKey(username) {
-    return `dl_trader_quiz_pages_u_${username}`;
+    const bid = currentBankId || "zhongji";
+    if (bid === "zhongji") return `dl_trader_quiz_pages_u_${username}`;
+    return `dl_trader_quiz_pages_u_${username}__${bid}`;
   }
 
   function validUsername(username) {
@@ -427,6 +436,7 @@
     els.startPanel.hidden = true;
     els.quizPanel.hidden = true;
     els.summaryPanel.hidden = true;
+    if (els.bankPanel) els.bankPanel.hidden = true;
     currentRoundMode = "normal";
     refreshRoundModeUI();
   }
@@ -441,8 +451,10 @@
     els.startPanel.hidden = false;
     els.quizPanel.hidden = true;
     els.summaryPanel.hidden = true;
+    if (els.bankPanel) els.bankPanel.hidden = false;
     els.authPassword.value = "";
     refreshRoundModeUI();
+    renderBankButtons();
   }
 
   function clearChoices() {
@@ -455,6 +467,15 @@
     multiPicked = null;
   }
 
+  function optionLetters(q) {
+    if (Array.isArray(q.option_letters) && q.option_letters.length) {
+      return q.option_letters.map(String);
+    }
+    if (q.question_type === "multi") return ["A", "B", "C", "D", "E"];
+    if (q.question_type === "judge") return ["A", "B"];
+    return ["A", "B", "C", "D"];
+  }
+
   /** @param {Record<string, unknown>} q */
   function renderChoices(q) {
     currentQtype = (q.question_type && String(q.question_type)) || "single";
@@ -462,7 +483,9 @@
     els.qHint.textContent = (q.hint && String(q.hint)) || "";
 
     if (currentQtype === "single") {
-      for (const ch of ["A", "B", "C", "D"]) {
+      const letters = optionLetters(q);
+      if (letters.length >= 5) els.choices.classList.add("choices--multi");
+      for (const ch of letters) {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "choice";
@@ -480,7 +503,7 @@
       els.choices.classList.add("choices--multi");
       els.btnConfirmMulti.hidden = false;
       multiPicked = new Set();
-      for (const ch of ["A", "B", "C", "D", "E"]) {
+      for (const ch of optionLetters(q)) {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "choice multi";
@@ -796,21 +819,85 @@
     wrongBook = new Set();
   });
 
+  function renderBankButtons() {
+    if (!els.bankList) return;
+    const meta = banksCatalog.find((b) => b.id === currentBankId);
+    if (els.bankName) els.bankName.textContent = (meta && meta.name) || "—";
+    els.bankList.innerHTML = "";
+    banksCatalog.forEach((bank) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn bank-btn" + (bank.id === currentBankId ? " primary" : "");
+      b.textContent = bank.short_name || bank.name;
+      b.addEventListener("click", () => selectBank(bank.id));
+      els.bankList.appendChild(b);
+    });
+  }
+
+  async function loadBankFile(bankId) {
+    const meta = banksCatalog.find((b) => b.id === bankId) || banksCatalog[0];
+    if (!meta) throw new Error("未配置题库");
+    const r = await fetch(meta.file, { cache: "no-store" });
+    if (!r.ok) throw new Error(`无法加载题库 ${meta.name} (${r.status})`);
+    const data = await r.json();
+    const base = data.questions;
+    if (!Array.isArray(base) || base.length === 0) {
+      throw new Error(`题库为空：${meta.name}`);
+    }
+    currentBankId = meta.id;
+    baseQuestions = base;
+    questionsReady = true;
+    try {
+      localStorage.setItem(BANK_PREF_KEY, currentBankId);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  async function selectBank(bankId) {
+    if (bankId === currentBankId) return;
+    clearError();
+    try {
+      await loadBankFile(bankId);
+      rebuildBank();
+      renderBankButtons();
+      renderStats();
+      els.quizPanel.hidden = true;
+      els.summaryPanel.hidden = true;
+      els.startPanel.hidden = false;
+    } catch (e) {
+      showError(e.message || String(e));
+    }
+  }
+
   async function boot() {
     clearError();
     setLoggedOutUI();
     try {
-      const r = await fetch("questions.json", { cache: "no-store" });
-      if (!r.ok) throw new Error(`无法加载题库 (${r.status})`);
-      const data = await r.json();
-      const base = data.questions;
-      if (!Array.isArray(base) || base.length === 0) {
-        throw new Error(
-          "题库为空或未运行 export_bank_for_pages.py 生成 questions.json",
-        );
+      const cr = await fetch("banks.json", { cache: "no-store" });
+      if (cr.ok) {
+        const catalog = await cr.json();
+        banksCatalog = Array.isArray(catalog.banks) ? catalog.banks : [];
+        let pref = "";
+        try {
+          pref = localStorage.getItem(BANK_PREF_KEY) || "";
+        } catch (_) {
+          pref = "";
+        }
+        currentBankId = pref || catalog.default || "zhongji";
       }
-      baseQuestions = base;
-      questionsReady = true;
+      if (!banksCatalog.length) {
+        banksCatalog = [
+          {
+            id: "zhongji",
+            name: "中级工题库",
+            short_name: "中级工",
+            file: "questions.json",
+          },
+        ];
+        currentBankId = "zhongji";
+      }
+      await loadBankFile(currentBankId);
 
       const sess = getSessionUser();
       const users = loadUsers();

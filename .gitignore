@@ -8,5 +8,10 @@ __pycache__/
 *.pyc
 .Python
 question_progress.csv
+question_progress__*.csv
+wrong_book.csv
+wrong_book__*.csv
 users.json
 user_progress/
+电力交易员/
+未命名/

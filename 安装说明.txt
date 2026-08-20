@@ -5,9 +5,10 @@
 【一、使用已打包好的程序（推荐）】
 
 1. 解压收到的 zip，得到文件夹「电力交易员刷题」。
-2. 将题库 Excel 文件放到该文件夹内，文件名与默认一致：
-   电力交易员中级工题库2025(2).xlsx
-   （若文件名不同，需用源码方式在 exam.py 里改默认文件名，或向开发者索取对应配置。）
+2. 将题库 Excel 文件放到该文件夹内：
+   - 中级工：电力交易员中级工题库2025(2).xlsx
+   - 二级/三级样卷：banks/erji.xlsx、banks/sanji.xlsx（打包版会一并复制）
+   打开网页后可在首页切换题库。
 3. 双击运行（必须在「dist」文件夹里，不要用「build」）：
    - 正确：…/刷题软件/dist/电力交易员刷题/电力交易员刷题
    - 错误：…/刷题软件/build/… 下的同名文件（仅为打包中间产物，会报 Python3 找不到）
@@ -35,13 +36,22 @@ https://<你的用户名>.github.io/<仓库名>/ 这类地址）：
 
 1. 在电脑上安装 Python 与依赖（pip install flask pandas openpyxl 等，与本地刷题相同）。
 2. 项目根目录执行：  python3 export_bank_for_pages.py
-   会在 docs/questions.json 写入题库数据（与当前 question_progress.csv / Excel 一致）。
+   会在 docs/ 写入 banks.json 与各题库 questions_*.json。
 3. 用 Git 初始化仓库，将项目（含 docs/）推送到 GitHub。
 4. 打开仓库 Settings → Pages → Build and deployment：
    Source 选「Deploy from a branch」，Branch 选 main（或你的默认分支），文件夹选「/docs」保存。
-5. 等待几分钟后用浏览器访问站点。更新题库后需重新执行 export 并推送新的 docs/questions.json。
+5. 等待几分钟后用浏览器访问站点。更新题库后需重新执行 export 并推送 docs/ 下的 JSON。
 
 说明：在线版纯静态页面，进度保存在访客浏览器的 localStorage，与桌面版 CSV 不互通；
 换浏览器或清除数据会丢进度。
+
+--------------------------------------------------------------------------------
+【四、Render 后端（Flask）】
+
+GitHub 仓库已包含 render.yaml。若 Render 已连接该仓库，推送 main 后会自动重新部署。
+新服务也可在 Render 控制台用 Blueprint 导入本仓库，或手动 Web Service：
+  Build：pip install -r requirements.txt
+  Start：gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8
+进度文件默认写在应用目录；若需持久化，请挂载磁盘并把环境变量 DATA_DIR 指到该路径。
 
 --------------------------------------------------------------------------------

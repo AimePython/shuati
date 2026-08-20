@@ -19,6 +19,9 @@
     whoami: $("whoami"),
     whoamiName: $("whoami-name"),
     btnLogout: $("btn-logout"),
+    bankPanel: $("bank-panel"),
+    bankName: $("bank-name"),
+    bankList: $("bank-list"),
     btnStart: $("btn-start"),
     btnStartWrong: $("btn-start-wrong"),
     modeTag: $("mode-tag"),
@@ -88,6 +91,7 @@
     els.summaryPanel.hidden = true;
     els.whoami.hidden = true;
     els.btnLogout.hidden = true;
+    if (els.bankPanel) els.bankPanel.hidden = true;
   }
 
   function setLoggedInState(username) {
@@ -100,6 +104,7 @@
     els.whoami.hidden = false;
     els.btnLogout.hidden = false;
     els.whoamiName.textContent = username;
+    if (els.bankPanel) els.bankPanel.hidden = false;
     refreshRoundModeUI();
   }
 
@@ -113,19 +118,68 @@
     els.err.textContent = "";
   }
 
-  async function loadStats() {
-    if (!loggedIn) return;
-    clearError();
-    const s = await fetchJSON("/api/stats");
+  function applyStats(s) {
     els.stats.total.textContent = s.total;
     els.stats.done.textContent = s.done;
     els.stats.undone.textContent = s.undone;
     els.stats.correct.textContent = s.correct;
     els.stats.wrong.textContent = s.wrong;
-    els.stats.rate.textContent = `${s.accuracy_percent.toFixed(1)}%`;
+    els.stats.rate.textContent = `${Number(s.accuracy_percent || 0).toFixed(1)}%`;
     if (els.wrongBookCount) {
       els.wrongBookCount.textContent = `${s.wrong_book || 0} 题`;
     }
+    if (els.bankName && s.bank_name) {
+      els.bankName.textContent = s.bank_name;
+    }
+  }
+
+  function optionLetters(q) {
+    if (Array.isArray(q.option_letters) && q.option_letters.length) {
+      return q.option_letters.map(String);
+    }
+    if (q.question_type === "multi") return ["A", "B", "C", "D", "E"];
+    if (q.question_type === "judge") return ["A", "B"];
+    return ["A", "B", "C", "D"];
+  }
+
+  async function loadBanks() {
+    if (!els.bankList) return;
+    const data = await fetchJSON("/api/banks");
+    if (els.bankName) els.bankName.textContent = data.bank_name || "—";
+    els.bankList.innerHTML = "";
+    (data.banks || []).forEach((bank) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn bank-btn" + (bank.current ? " primary" : "");
+      b.textContent = bank.short_name || bank.name;
+      b.dataset.bankId = bank.id;
+      b.addEventListener("click", () => selectBank(bank.id));
+      els.bankList.appendChild(b);
+    });
+  }
+
+  async function selectBank(bankId) {
+    clearError();
+    try {
+      const data = await fetchJSON("/api/bank", {
+        method: "POST",
+        body: JSON.stringify({ bank_id: bankId }),
+      });
+      applyStats(data);
+      await loadBanks();
+      els.quizPanel.hidden = true;
+      els.summaryPanel.hidden = true;
+      els.startPanel.hidden = false;
+    } catch (e) {
+      showError(e.message || String(e));
+    }
+  }
+
+  async function loadStats() {
+    if (!loggedIn) return;
+    clearError();
+    const s = await fetchJSON("/api/stats");
+    applyStats(s);
   }
 
   function clearChoices() {
@@ -144,7 +198,9 @@
     els.qHint.textContent = q.hint || "";
 
     if (currentQtype === "single") {
-      "ABCD".split("").forEach((ch) => {
+      const letters = optionLetters(q);
+      if (letters.length >= 5) els.choices.classList.add("choices--multi");
+      letters.forEach((ch) => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "choice";
@@ -162,7 +218,7 @@
       els.choices.classList.add("choices--multi");
       els.btnConfirmMulti.hidden = false;
       multiPicked = new Set();
-      "ABCDE".split("").forEach((ch) => {
+      optionLetters(q).forEach((ch) => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "choice multi";
@@ -365,6 +421,7 @@
       });
       setLoggedInState(res.username || username);
       els.authPassword.value = "";
+      await loadBanks();
       await loadStats();
     } catch (e) {
       showError(e.message || String(e));
@@ -390,6 +447,7 @@
       const me = await fetchJSON("/api/auth/me");
       if (me.logged_in) {
         setLoggedInState(me.username || "");
+        await loadBanks();
         await loadStats();
       }
     } catch (e) {

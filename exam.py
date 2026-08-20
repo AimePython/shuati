@@ -29,7 +29,55 @@ Q_JUDGE_START, Q_JUDGE_END = 551, 790
 ROUND_PLAN = {"single": 100, "multi": 30, "judge": 40}
 
 def _resolve_path(path: str) -> str:
-    return path if os.path.isabs(path) else os.path.join(_SCRIPT_DIR, path)
+    if os.path.isabs(path):
+        return path
+    candidates = [os.path.join(_SCRIPT_DIR, path)]
+    if _is_pyinstaller():
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(os.path.join(meipass, path))
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return candidates[0]
+
+
+DEFAULT_BANK_ID = "zhongji"
+BANK_CATALOG = [
+    {
+        "id": "zhongji",
+        "name": "中级工题库",
+        "short_name": "中级工",
+        "excel": "电力交易员中级工题库2025(2).xlsx",
+        "type_by_number": True,
+    },
+    {
+        "id": "erji",
+        "name": "电力交易员二级（样卷）",
+        "short_name": "二级样卷",
+        "excel": os.path.join("banks", "erji.xlsx"),
+        "type_by_number": False,
+    },
+    {
+        "id": "sanji",
+        "name": "电力交易员三级（样卷）",
+        "short_name": "三级样卷",
+        "excel": os.path.join("banks", "sanji.xlsx"),
+        "type_by_number": False,
+    },
+]
+
+
+def get_bank_meta(bank_id: str | None) -> dict:
+    bid = (bank_id or DEFAULT_BANK_ID).strip()
+    for item in BANK_CATALOG:
+        if item["id"] == bid:
+            return item
+    return BANK_CATALOG[0]
+
+
+def list_banks() -> list[dict]:
+    return [dict(item) for item in BANK_CATALOG]
 
 
 def type_by_question_number(n: int) -> str:
@@ -95,7 +143,7 @@ def _canonical_standard(raw, qtype: str, row: pd.Series) -> str:
         return "".join(sorted(set(re.findall(r"[A-E]", raw_str.upper()))))
     if qtype == "judge":
         return _parse_judge_canonical(raw_str)
-    letters = re.findall(r"[ABCD]", raw_str.upper())
+    letters = re.findall(r"[A-E]", raw_str.upper())
     if letters:
         return letters[0]
     return _parse_judge_canonical(raw_str)
@@ -121,7 +169,7 @@ def normalize_user_answer(user_in: str, qtype: str) -> str:
             return "B"
         m = re.search(r"[ABCD]", u)
         return m.group(0) if m else ""
-    m = re.search(r"[ABCD]", u)
+    m = re.search(r"[A-E]", u)
     return m.group(0) if m else ""
 
 
@@ -150,6 +198,49 @@ def _type_label(qt: str) -> str:
     return {"single": "单选", "multi": "多选", "judge": "判断"}.get(str(qt), str(qt))
 
 
+def hint_for_type(qt: str, *, type_by_number: bool = False) -> str:
+    qt = str(qt)
+    if type_by_number:
+        return {
+            "single": "单选题（全库第 1–350 题）：四选一",
+            "multi": "多选题（全库第 351–550 题，选项 A–E）：须选中全部正确选项，选好后点「确认答案」；提交后显示正确答案",
+            "judge": "判断题（全库第 551–790 题）：选对（A/对）或错（B/错）",
+        }.get(qt, "")
+    return {
+        "single": "单选题：选择唯一正确答案（部分题目含选项 E）",
+        "multi": "多选题：须选中全部正确选项，选好后点「确认答案」；提交后显示正确答案",
+        "judge": "判断题：选对（A/对）或错（B/错）",
+    }.get(qt, "")
+
+
+def option_letters_for_row(row: pd.Series, qtype: str) -> list[str]:
+    qtype = str(qtype).strip()
+    if qtype == "judge":
+        return ["A", "B"]
+    found: list[str] = []
+    mapping = (
+        ("选项 A", "A"),
+        ("选项 B", "B"),
+        ("选项 C", "C"),
+        ("选项 D", "D"),
+        ("选项 E", "E"),
+        ("选项E", "E"),
+    )
+    for col, ch in mapping:
+        if col in row.index and pd.notna(row.get(col)) and str(row.get(col)).strip():
+            if ch not in found:
+                found.append(ch)
+    if found:
+        return found
+    content = str(row["题目内容"]) if "题目内容" in row.index else ""
+    for ch in "ABCDE":
+        if re.search(rf"(?m)^{ch}[、.．]", content):
+            found.append(ch)
+    if found:
+        return found
+    return list("ABCDE") if qtype == "multi" else list("ABCD")
+
+
 def _build_question_content(row: pd.Series) -> str:
     if "题目内容" in row.index and pd.notna(row["题目内容"]) and str(row["题目内容"]).strip():
         return str(row["题目内容"]).strip()
@@ -161,7 +252,7 @@ def _build_question_content(row: pd.Series) -> str:
     return "\n".join(lines)
 
 
-def _prepare_question_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+def _prepare_question_dataframe(df: pd.DataFrame, *, type_by_number: bool = True) -> pd.DataFrame:
     """统一列名与答案格式，兼容「题干/正确答案」与「题目内容/标准答案」两套表头。"""
     if "标准答案" not in df.columns and "正确答案" in df.columns:
         df = df.rename(columns={"正确答案": "标准答案"})
@@ -185,8 +276,13 @@ def _prepare_question_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     canon_list = []
     for i, (_, row) in enumerate(df.iterrows()):
         raw = row["标准答案"]
-        qnum = _question_number_for_row(row, i)
-        qt = type_by_question_number(qnum)
+        existing = str(row["题目类型"]).strip() if "题目类型" in df.columns else ""
+        if existing in ("single", "multi", "judge"):
+            qt = existing
+        elif type_by_number:
+            qt = type_by_question_number(_question_number_for_row(row, i))
+        else:
+            qt = "single"
         ca = _canonical_standard(raw, qt, row)
         types_list.append(qt)
         canon_list.append(ca)
@@ -198,11 +294,30 @@ def _prepare_question_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 class QuestionBank:
     def __init__(
         self,
-        excel_path="电力交易员中级工题库2025(2).xlsx",
-        progress_path="question_progress.csv",
-        wrong_book_path="wrong_book.csv",
+        excel_path: str | None = None,
+        progress_path: str | None = None,
+        wrong_book_path: str | None = None,
         quiet: bool = False,
+        bank_id: str = DEFAULT_BANK_ID,
     ):
+        meta = get_bank_meta(bank_id)
+        self.bank_id = meta["id"]
+        self.bank_name = meta["name"]
+        self.type_by_number = bool(meta.get("type_by_number"))
+        if excel_path is None:
+            excel_path = meta["excel"]
+        if progress_path is None:
+            progress_path = (
+                "question_progress.csv"
+                if self.bank_id == DEFAULT_BANK_ID
+                else f"question_progress__{self.bank_id}.csv"
+            )
+        if wrong_book_path is None:
+            wrong_book_path = (
+                "wrong_book.csv"
+                if self.bank_id == DEFAULT_BANK_ID
+                else f"wrong_book__{self.bank_id}.csv"
+            )
         self.excel_path = _resolve_path(excel_path)
         self.progress_path = _resolve_path(progress_path)
         self.wrong_book_path = _resolve_path(wrong_book_path)
@@ -212,20 +327,19 @@ class QuestionBank:
         self.total_questions = len(self.df)
         if not self.quiet:
             self.show_overall_progress()
-            print(f"✅ 题库加载成功！总题数：{self.total_questions} 道")
+            print(f"✅ 题库加载成功（{self.bank_name}）！总题数：{self.total_questions} 道")
 
     def load_progress(self):
         if os.path.exists(self.progress_path):
             df = pd.read_csv(self.progress_path, encoding="utf-8")
-            return _prepare_question_dataframe(df)
+            return _prepare_question_dataframe(df, type_by_number=self.type_by_number)
         if not os.path.isfile(self.excel_path):
             raise FileNotFoundError(
                 f"找不到题库 Excel：{self.excel_path}\n"
-                "请将题库文件放在与 exam.py 同一目录，或把文件名改为默认的 "
-                "「电力交易员中级工题库2025(2).xlsx」，或在代码里传入正确的 excel_path。"
+                "请将题库文件放在与 exam.py 同一目录，或确认 banks/ 下已有对应题库。"
             )
         df = _read_excel(self.excel_path)
-        df = _prepare_question_dataframe(df)
+        df = _prepare_question_dataframe(df, type_by_number=self.type_by_number)
         df["status"] = "未做"
         df["question_index"] = range(len(df))
         self.save_progress(df)
