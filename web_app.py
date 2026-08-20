@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import csv
 import os
 import socket
 import sys
@@ -20,9 +21,11 @@ import traceback
 import webbrowser
 import json
 import re
+from datetime import datetime
+from io import StringIO
 from threading import Lock
 
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, Response, jsonify, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from exam import (
@@ -57,6 +60,17 @@ if os.environ.get("RENDER"):
     app.config["SESSION_COOKIE_SECURE"] = True
 _bank_by_user: dict[str, QuestionBank] = {}
 _bank_lock = Lock()
+_accounts_ready = False
+
+
+@app.before_request
+def _bootstrap_accounts() -> None:
+    global _accounts_ready
+    if _accounts_ready:
+        return
+    with _users_lock:
+        _load_users()
+    _accounts_ready = True
 
 
 def _data_dir() -> str:
@@ -71,6 +85,10 @@ def _users_file() -> str:
     return os.path.join(_data_dir(), "users.json")
 
 
+def _ledger_file() -> str:
+    return os.path.join(_data_dir(), "account_ledger.csv")
+
+
 def _progress_dir() -> str:
     p = os.path.join(_data_dir(), "user_progress")
     os.makedirs(p, exist_ok=True)
@@ -79,22 +97,204 @@ def _progress_dir() -> str:
 
 _users_lock = Lock()
 
+_STATUS_LABEL = {"pending": "待审批", "approved": "已通过", "rejected": "已拒绝"}
+_ROLE_LABEL = {"admin": "管理员", "user": "学员"}
+_LEDGER_FIELDS = ("用户名", "密码", "角色", "状态", "注册时间", "审批时间", "审批人")
 
-def _load_users() -> dict[str, str]:
+
+def _now_text() -> str:
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _admin_username() -> str:
+    return (os.environ.get("ADMIN_USERNAME") or "admin").strip() or "admin"
+
+
+def _admin_password() -> str:
+    env = (os.environ.get("ADMIN_PASSWORD") or "").strip()
+    if env:
+        return env
+    if os.environ.get("RENDER"):
+        return ""
+    return "admin123456"
+
+
+def _blank_user(
+    password_hash: str,
+    password: str = "",
+    role: str = "user",
+    status: str = "pending",
+    created_at: str = "",
+    reviewed_at: str = "",
+    reviewed_by: str = "",
+) -> dict:
+    return {
+        "password_hash": password_hash,
+        "password": password,
+        "role": role,
+        "status": status,
+        "created_at": created_at or _now_text(),
+        "reviewed_at": reviewed_at,
+        "reviewed_by": reviewed_by,
+    }
+
+
+def _normalize_users(raw) -> tuple[dict[str, dict], bool]:
+    """兼容旧版 {用户名: 哈希}，返回 (users, 是否发生了迁移)。"""
+    if not isinstance(raw, dict):
+        return {}, False
+    inner = raw.get("users") if "users" in raw and isinstance(raw.get("users"), dict) else raw
+    if inner is raw and any(isinstance(v, dict) and "password_hash" in v for v in raw.values()):
+        inner = raw
+    elif "users" in raw and isinstance(raw.get("users"), dict):
+        inner = raw["users"]
+    migrated = False
+    users: dict[str, dict] = {}
+    for name, rec in inner.items():
+        username = str(name)
+        if isinstance(rec, str):
+            users[username] = _blank_user(
+                rec,
+                password="",
+                role="admin" if username == _admin_username() else "user",
+                status="approved",
+                created_at="",
+                reviewed_at=_now_text(),
+                reviewed_by="migrate",
+            )
+            migrated = True
+            continue
+        if not isinstance(rec, dict):
+            continue
+        status = str(rec.get("status") or "approved").strip() or "approved"
+        if status not in _STATUS_LABEL:
+            status = "approved"
+        role = str(rec.get("role") or "user").strip() or "user"
+        if role not in _ROLE_LABEL:
+            role = "user"
+        users[username] = {
+            "password_hash": str(rec.get("password_hash") or rec.get("hash") or ""),
+            "password": str(rec.get("password") or ""),
+            "role": role,
+            "status": status,
+            "created_at": str(rec.get("created_at") or ""),
+            "reviewed_at": str(rec.get("reviewed_at") or rec.get("approved_at") or ""),
+            "reviewed_by": str(rec.get("reviewed_by") or rec.get("approved_by") or ""),
+        }
+    return users, migrated
+
+
+def _ledger_rows(users: dict[str, dict]) -> list[dict[str, str]]:
+    rows = []
+    for username in sorted(users):
+        rec = users[username]
+        pwd = str(rec.get("password") or "").strip()
+        rows.append(
+            {
+                "用户名": username,
+                "密码": pwd if pwd else "（历史账号，仅保存加密密码）",
+                "角色": _ROLE_LABEL.get(str(rec.get("role")), "学员"),
+                "状态": _STATUS_LABEL.get(str(rec.get("status")), str(rec.get("status"))),
+                "注册时间": str(rec.get("created_at") or ""),
+                "审批时间": str(rec.get("reviewed_at") or ""),
+                "审批人": str(rec.get("reviewed_by") or ""),
+            }
+        )
+    return rows
+
+
+def _write_ledger_csv(users: dict[str, dict]) -> None:
+    path = _ledger_file()
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(_LEDGER_FIELDS))
+        writer.writeheader()
+        writer.writerows(_ledger_rows(users))
+
+
+def _save_users(users: dict[str, dict]) -> None:
     path = _users_file()
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        return {}
-    return {str(k): str(v) for k, v in data.items()}
-
-
-def _save_users(users: dict[str, str]) -> None:
-    path = _users_file()
+    payload = {"version": 2, "users": users}
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    _write_ledger_csv(users)
+
+
+def _ensure_admin(users: dict[str, dict]) -> bool:
+    name = _admin_username()
+    rec = users.get(name)
+    if rec and rec.get("role") == "admin" and rec.get("status") == "approved" and rec.get("password_hash"):
+        return False
+    password = _admin_password()
+    if not password:
+        print("⚠ 未设置 ADMIN_PASSWORD，跳过创建管理员。请在环境变量中配置后重启。")
+        return False
+    if rec and rec.get("password_hash"):
+        rec["role"] = "admin"
+        rec["status"] = "approved"
+        if not rec.get("reviewed_at"):
+            rec["reviewed_at"] = _now_text()
+            rec["reviewed_by"] = "bootstrap"
+        return True
+    users[name] = _blank_user(
+        generate_password_hash(password),
+        password=password,
+        role="admin",
+        status="approved",
+        reviewed_at=_now_text(),
+        reviewed_by="bootstrap",
+    )
+    print(f"\n已创建管理员账号：用户名 {name}  （密码见环境变量 ADMIN_PASSWORD，本地默认 admin123456）")
+    print("审批入口：/admin\n")
+    return True
+
+
+def _load_users() -> dict[str, dict]:
+    path = _users_file()
+    raw = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            try:
+                raw = json.load(f)
+            except json.JSONDecodeError:
+                raw = {}
+    users, migrated = _normalize_users(raw)
+    created = _ensure_admin(users)
+    if migrated or created or not os.path.exists(_ledger_file()):
+        _save_users(users)
+    return users
+
+
+def _account_public(username: str, rec: dict) -> dict:
+    return {
+        "username": username,
+        "password": str(rec.get("password") or ""),
+        "password_missing": not bool(str(rec.get("password") or "").strip()),
+        "role": str(rec.get("role") or "user"),
+        "role_label": _ROLE_LABEL.get(str(rec.get("role") or "user"), "学员"),
+        "status": str(rec.get("status") or "pending"),
+        "status_label": _STATUS_LABEL.get(str(rec.get("status") or "pending"), "待审批"),
+        "created_at": str(rec.get("created_at") or ""),
+        "reviewed_at": str(rec.get("reviewed_at") or ""),
+        "reviewed_by": str(rec.get("reviewed_by") or ""),
+    }
+
+
+def _current_record() -> tuple[str | None, dict | None]:
+    username = _current_user()
+    if not username:
+        return None, None
+    with _users_lock:
+        rec = _load_users().get(username)
+    return username, rec
+
+
+def _is_admin_user(username: str | None, rec: dict | None) -> bool:
+    return bool(
+        username
+        and rec
+        and rec.get("role") == "admin"
+        and rec.get("status") == "approved"
+    )
 
 
 def _valid_username(username: str) -> bool:
@@ -162,10 +362,23 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/admin")
+def admin_page():
+    return render_template("admin.html")
+
+
 @app.route("/api/auth/me")
 def api_auth_me():
-    u = _current_user()
-    return jsonify({"ok": True, "logged_in": bool(u), "username": u})
+    username, rec = _current_record()
+    return jsonify(
+        {
+            "ok": True,
+            "logged_in": bool(username),
+            "username": username,
+            "role": (rec or {}).get("role") if rec else None,
+            "is_admin": _is_admin_user(username, rec),
+        }
+    )
 
 
 @app.route("/api/auth/register", methods=["POST"])
@@ -180,17 +393,32 @@ def api_auth_register():
                 "error": "用户名格式不正确：3-32位，仅支持字母/数字/下划线",
             }
         ), 400
+    if username.lower() == _admin_username().lower():
+        return jsonify({"ok": False, "error": "该用户名已保留，请换一个"}), 400
     if len(password) < 6:
         return jsonify({"ok": False, "error": "密码至少 6 位"}), 400
     with _users_lock:
         users = _load_users()
         if username in users:
+            rec = users[username]
+            if rec.get("status") == "pending":
+                return jsonify({"ok": False, "error": "该账号已提交，正在等待管理员审批"}), 409
             return jsonify({"ok": False, "error": "用户名已存在"}), 409
-        users[username] = generate_password_hash(password)
+        users[username] = _blank_user(
+            generate_password_hash(password),
+            password=password,
+            role="user",
+            status="pending",
+        )
         _save_users(users)
-    # 新用户首次创建时不带历史记录：若文件不存在，QuestionBank 会以全“未做”初始化。
-    session["username"] = username
-    return jsonify({"ok": True, "username": username})
+    return jsonify(
+        {
+            "ok": True,
+            "pending": True,
+            "username": username,
+            "message": "已提交注册，请等待管理员审批通过后再登录。",
+        }
+    )
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -200,17 +428,105 @@ def api_auth_login():
     password = str(data.get("password", "")).strip()
     with _users_lock:
         users = _load_users()
-        h = users.get(username)
-    if not h or not check_password_hash(h, password):
+        rec = users.get(username)
+    if not rec or not check_password_hash(str(rec.get("password_hash") or ""), password):
         return jsonify({"ok": False, "error": "用户名或密码错误"}), 401
+    status = str(rec.get("status") or "pending")
+    if status == "pending":
+        return jsonify({"ok": False, "error": "账号待管理员审批，通过后方可登录"}), 403
+    if status == "rejected":
+        return jsonify({"ok": False, "error": "该账号未通过审批，无法登录"}), 403
     session["username"] = username
-    return jsonify({"ok": True, "username": username})
+    return jsonify(
+        {
+            "ok": True,
+            "username": username,
+            "role": rec.get("role") or "user",
+            "is_admin": _is_admin_user(username, rec),
+        }
+    )
 
 
 @app.route("/api/auth/logout", methods=["POST"])
 def api_auth_logout():
     session.pop("username", None)
     return jsonify({"ok": True})
+
+
+def _require_admin():
+    username, rec = _current_record()
+    if not username:
+        return None, (jsonify({"ok": False, "error": "未登录"}), 401)
+    if not _is_admin_user(username, rec):
+        return None, (jsonify({"ok": False, "error": "需要管理员权限"}), 403)
+    return username, None
+
+
+@app.route("/api/admin/accounts")
+def api_admin_accounts():
+    admin_name, err = _require_admin()
+    if err:
+        return err
+    with _users_lock:
+        users = _load_users()
+        items = [_account_public(name, rec) for name, rec in sorted(users.items())]
+    pending = sum(1 for x in items if x["status"] == "pending")
+    return jsonify(
+        {
+            "ok": True,
+            "admin": admin_name,
+            "pending": pending,
+            "total": len(items),
+            "accounts": items,
+            "ledger_path": os.path.basename(_ledger_file()),
+        }
+    )
+
+
+@app.route("/api/admin/accounts/review", methods=["POST"])
+def api_admin_review():
+    admin_name, err = _require_admin()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    username = str(data.get("username", "")).strip()
+    action = str(data.get("action", "")).strip().lower()
+    if action not in ("approve", "reject"):
+        return jsonify({"ok": False, "error": "未知操作"}), 400
+    if not username:
+        return jsonify({"ok": False, "error": "缺少用户名"}), 400
+    with _users_lock:
+        users = _load_users()
+        rec = users.get(username)
+        if not rec:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        if rec.get("role") == "admin" and action == "reject":
+            return jsonify({"ok": False, "error": "不能拒绝管理员账号"}), 400
+        rec["status"] = "approved" if action == "approve" else "rejected"
+        rec["reviewed_at"] = _now_text()
+        rec["reviewed_by"] = admin_name
+        _save_users(users)
+        public = _account_public(username, rec)
+    return jsonify({"ok": True, "account": public})
+
+
+@app.route("/api/admin/ledger.csv")
+def api_admin_ledger_csv():
+    _, err = _require_admin()
+    if err:
+        return err
+    with _users_lock:
+        users = _load_users()
+        buf = StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(_LEDGER_FIELDS))
+        writer.writeheader()
+        writer.writerows(_ledger_rows(users))
+        body = buf.getvalue()
+    return Response(
+        body.encode("utf-8-sig"),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=account_ledger.csv"},
+    )
 
 
 @app.route("/api/stats")

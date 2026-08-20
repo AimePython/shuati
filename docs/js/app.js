@@ -14,6 +14,7 @@
       rate: $("st-rate"),
     },
     err: $("global-error"),
+    notice: $("global-notice"),
     authPanel: $("auth-panel"),
     authUsername: $("auth-username"),
     authPassword: $("auth-password"),
@@ -21,6 +22,7 @@
     btnRegister: $("btn-register"),
     whoami: $("whoami"),
     whoamiName: $("whoami-name"),
+    btnAdmin: $("btn-admin"),
     btnLogout: $("btn-logout"),
     bankPanel: $("bank-panel"),
     bankName: $("bank-name"),
@@ -92,12 +94,38 @@
     return /^[A-Za-z0-9_]{3,32}$/.test(username);
   }
 
+  const ADMIN_NAME = "admin";
+
+  function nowText() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  function normalizeUserRec(username, rec) {
+    if (!rec || typeof rec !== "object") return null;
+    const out = { ...rec };
+    if (!out.status) out.status = "approved";
+    if (!out.role) out.role = username === ADMIN_NAME ? "admin" : "user";
+    if (out.password == null) out.password = "";
+    if (!out.created_at) out.created_at = "";
+    if (!out.reviewed_at) out.reviewed_at = out.status === "approved" ? out.created_at || "" : "";
+    if (!out.reviewed_by) out.reviewed_by = out.status === "approved" ? "migrate" : "";
+    return out;
+  }
+
   function loadUsers() {
     try {
       const raw = localStorage.getItem(USERS_KEY);
       if (!raw) return {};
       const o = JSON.parse(raw);
-      return o && typeof o === "object" ? o : {};
+      if (!o || typeof o !== "object") return {};
+      const next = {};
+      Object.keys(o).forEach((name) => {
+        const rec = normalizeUserRec(name, o[name]);
+        if (rec) next[name] = rec;
+      });
+      return next;
     } catch {
       return {};
     }
@@ -407,11 +435,23 @@
   function showError(msg) {
     els.err.textContent = msg;
     els.err.hidden = false;
+    if (els.notice) els.notice.hidden = true;
+  }
+
+  function showNotice(msg) {
+    if (!els.notice) return;
+    els.notice.textContent = msg;
+    els.notice.hidden = false;
+    els.err.hidden = true;
   }
 
   function clearError() {
     els.err.hidden = true;
     els.err.textContent = "";
+    if (els.notice) {
+      els.notice.hidden = true;
+      els.notice.textContent = "";
+    }
   }
 
   function renderStats() {
@@ -432,6 +472,7 @@
     els.authPanel.hidden = false;
     els.whoami.hidden = true;
     els.btnLogout.hidden = true;
+    if (els.btnAdmin) els.btnAdmin.hidden = true;
     els.statsPanel.hidden = true;
     els.startPanel.hidden = true;
     els.quizPanel.hidden = true;
@@ -447,6 +488,10 @@
     els.whoami.hidden = false;
     els.btnLogout.hidden = false;
     els.whoamiName.textContent = username;
+    if (els.btnAdmin) {
+      const rec = loadUsers()[username];
+      els.btnAdmin.hidden = !(rec && rec.role === "admin" && rec.status === "approved");
+    }
     els.statsPanel.hidden = false;
     els.startPanel.hidden = false;
     els.quizPanel.hidden = true;
@@ -765,23 +810,38 @@
       showError("用户名格式：3-32 位，仅字母/数字/下划线");
       return;
     }
+    if (username.toLowerCase() === ADMIN_NAME) {
+      showError("该用户名已保留，请换一个");
+      return;
+    }
     if (password.length < 6) {
       showError("密码至少 6 位");
       return;
     }
     const users = loadUsers();
     if (users[username]) {
+      if (users[username].status === "pending") {
+        showError("该账号已提交，正在等待管理员审批");
+        return;
+      }
       showError("用户名已存在");
       return;
     }
     const salt = randomSalt();
     const hash = await hashPassword(password, salt);
-    users[username] = { salt, hash };
+    users[username] = {
+      salt,
+      hash,
+      password,
+      role: "user",
+      status: "pending",
+      created_at: nowText(),
+      reviewed_at: "",
+      reviewed_by: "",
+    };
     saveUsers(users);
-    setSessionUser(username);
-    setLoggedInUI(username);
-    rebuildBank();
-    renderStats();
+    els.authPassword.value = "";
+    showNotice("已提交注册，请等待管理员审批通过后再登录。");
   }
 
   async function tryLogin() {
@@ -797,6 +857,14 @@
     const h = await hashPassword(password, rec.salt);
     if (h !== rec.hash) {
       showError("用户名或密码错误");
+      return;
+    }
+    if (rec.status === "pending") {
+      showError("账号待管理员审批，通过后方可登录");
+      return;
+    }
+    if (rec.status === "rejected") {
+      showError("该账号未通过审批，无法登录");
       return;
     }
     setSessionUser(username);
@@ -901,10 +969,13 @@
 
       const sess = getSessionUser();
       const users = loadUsers();
-      if (sess && users[sess]) {
+      const rec = sess ? users[sess] : null;
+      if (sess && rec && rec.status === "approved") {
         setLoggedInUI(sess);
         rebuildBank();
         renderStats();
+      } else if (sess) {
+        setSessionUser("");
       }
     } catch (e) {
       showError(e.message || String(e));

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账号台账 · 审批</title>
+  <link rel="stylesheet" href="./css/style.css?v=20260820c" />
+</head>
+<body>
+  <div class="app app--wide">
+    <header class="header">
+      <h1>账号密码台账</h1>
+      <p class="subtitle">网页版台账仅保存在本机浏览器；多人审批请用服务端</p>
+      <p class="subtitle" id="whoami" hidden>当前管理员：<strong id="whoami-name"></strong></p>
+      <div class="actions header-actions">
+        <a class="btn ghost" href="./index.html">返回刷题</a>
+        <button type="button" class="btn ghost" id="btn-logout" hidden>退出登录</button>
+      </div>
+    </header>
+
+    <p class="error" id="global-error" hidden></p>
+    <p class="notice" id="global-notice" hidden></p>
+
+    <section class="panel" id="init-panel" hidden>
+      <h2>初始化管理员</h2>
+      <p class="auth-hint">当前浏览器还没有管理员账号。设置密码后即可审批新注册用户。</p>
+      <label class="field">
+        管理员密码（至少 6 位）
+        <input type="password" id="init-password" maxlength="64" />
+      </label>
+      <div class="actions">
+        <button type="button" class="btn primary" id="btn-init">创建管理员</button>
+      </div>
+    </section>
+
+    <section class="panel" id="auth-panel">
+      <h2>管理员登录</h2>
+      <label class="field">
+        用户名
+        <input type="text" id="auth-username" maxlength="32" autocomplete="username" />
+      </label>
+      <label class="field">
+        密码
+        <input type="password" id="auth-password" maxlength="64" autocomplete="current-password" />
+      </label>
+      <div class="actions">
+        <button type="button" class="btn primary" id="btn-login">登录</button>
+      </div>
+    </section>
+
+    <section class="panel" id="ledger-panel" hidden>
+      <div class="ledger-toolbar">
+        <p class="mode-line">共 <strong id="st-total">0</strong> 个账号，待审批 <strong id="st-pending">0</strong></p>
+        <div class="actions">
+          <button type="button" class="btn" id="btn-download">下载台账 CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>密码</th>
+              <th>角色</th>
+              <th>状态</th>
+              <th>注册时间</th>
+              <th>审批时间</th>
+              <th>审批人</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="ledger-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="./js/admin.js?v=20260820c"></script>
+</body>
+</html>

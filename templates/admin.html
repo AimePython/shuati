@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账号台账 · 审批</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <div class="app app--wide">
+    <header class="header">
+      <h1>账号密码台账</h1>
+      <p class="subtitle">新注册账号需审批通过后才能登录</p>
+      <p class="subtitle" id="whoami" hidden>当前管理员：<strong id="whoami-name"></strong></p>
+      <div class="actions header-actions">
+        <a class="btn ghost" href="/">返回刷题</a>
+        <button type="button" class="btn ghost" id="btn-logout" hidden>退出登录</button>
+      </div>
+    </header>
+
+    <p class="error" id="global-error" hidden></p>
+    <p class="notice" id="global-notice" hidden></p>
+
+    <section class="panel" id="auth-panel">
+      <h2>管理员登录</h2>
+      <label class="field">
+        用户名
+        <input type="text" id="auth-username" maxlength="32" autocomplete="username" />
+      </label>
+      <label class="field">
+        密码
+        <input type="password" id="auth-password" maxlength="64" autocomplete="current-password" />
+      </label>
+      <div class="actions">
+        <button type="button" class="btn primary" id="btn-login">登录</button>
+      </div>
+    </section>
+
+    <section class="panel" id="ledger-panel" hidden>
+      <div class="ledger-toolbar">
+        <p class="mode-line">共 <strong id="st-total">0</strong> 个账号，待审批 <strong id="st-pending">0</strong></p>
+        <div class="actions">
+          <a class="btn" id="btn-download" href="/api/admin/ledger.csv">下载台账 CSV</a>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>密码</th>
+              <th>角色</th>
+              <th>状态</th>
+              <th>注册时间</th>
+              <th>审批时间</th>
+              <th>审批人</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="ledger-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</body>
+</html>

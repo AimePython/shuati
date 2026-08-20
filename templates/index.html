@@ -12,11 +12,15 @@
       <h1>电力交易员 · 刷题</h1>
       <p class="subtitle">错题优先 · 进度自动保存（多用户独立）</p>
       <p class="subtitle" id="whoami" hidden>当前用户：<strong id="whoami-name"></strong></p>
-      <button type="button" class="btn ghost" id="btn-logout" hidden>退出登录</button>
+      <div class="actions header-actions">
+        <a class="btn ghost" id="btn-admin" href="/admin" hidden>账号台账</a>
+        <button type="button" class="btn ghost" id="btn-logout" hidden>退出登录</button>
+      </div>
     </header>
 
     <section class="panel" id="auth-panel">
       <h2>登录 / 注册</h2>
+      <p class="auth-hint">新账号提交后需管理员审批才能登录。管理员入口：<a href="/admin">账号台账</a></p>
       <label class="field">
         用户名（3-32 位，字母/数字/下划线）
         <input type="text" id="auth-username" maxlength="32" />
@@ -46,6 +50,7 @@
     </section>
 
     <p class="error" id="global-error" hidden></p>
+    <p class="notice" id="global-notice" hidden></p>
 
     <section class="panel start-panel" id="start-panel">
       <p class="summary-line">固定抽题：随机 100 道单选 + 30 道多选 + 40 道判断（错题优先）</p>

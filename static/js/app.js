@@ -11,6 +11,7 @@
       rate: $("st-rate"),
     },
     err: $("global-error"),
+    notice: $("global-notice"),
     authPanel: $("auth-panel"),
     authUsername: $("auth-username"),
     authPassword: $("auth-password"),
@@ -18,6 +19,7 @@
     btnRegister: $("btn-register"),
     whoami: $("whoami"),
     whoamiName: $("whoami-name"),
+    btnAdmin: $("btn-admin"),
     btnLogout: $("btn-logout"),
     bankPanel: $("bank-panel"),
     bankName: $("bank-name"),
@@ -91,10 +93,11 @@
     els.summaryPanel.hidden = true;
     els.whoami.hidden = true;
     els.btnLogout.hidden = true;
+    if (els.btnAdmin) els.btnAdmin.hidden = true;
     if (els.bankPanel) els.bankPanel.hidden = true;
   }
 
-  function setLoggedInState(username) {
+  function setLoggedInState(username, isAdmin) {
     loggedIn = true;
     els.authPanel.hidden = true;
     els.statsPanel.hidden = false;
@@ -104,6 +107,7 @@
     els.whoami.hidden = false;
     els.btnLogout.hidden = false;
     els.whoamiName.textContent = username;
+    if (els.btnAdmin) els.btnAdmin.hidden = !isAdmin;
     if (els.bankPanel) els.bankPanel.hidden = false;
     refreshRoundModeUI();
   }
@@ -111,11 +115,23 @@
   function showError(msg) {
     els.err.textContent = msg;
     els.err.hidden = false;
+    if (els.notice) els.notice.hidden = true;
+  }
+
+  function showNotice(msg) {
+    if (!els.notice) return;
+    els.notice.textContent = msg;
+    els.notice.hidden = false;
+    els.err.hidden = true;
   }
 
   function clearError() {
     els.err.hidden = true;
     els.err.textContent = "";
+    if (els.notice) {
+      els.notice.hidden = true;
+      els.notice.textContent = "";
+    }
   }
 
   function applyStats(s) {
@@ -419,7 +435,12 @@
         method: "POST",
         body: JSON.stringify({ username, password }),
       });
-      setLoggedInState(res.username || username);
+      if (res.pending) {
+        showNotice(res.message || "已提交注册，请等待管理员审批通过后再登录。");
+        els.authPassword.value = "";
+        return;
+      }
+      setLoggedInState(res.username || username, Boolean(res.is_admin));
       els.authPassword.value = "";
       await loadBanks();
       await loadStats();
@@ -446,7 +467,7 @@
     try {
       const me = await fetchJSON("/api/auth/me");
       if (me.logged_in) {
-        setLoggedInState(me.username || "");
+        setLoggedInState(me.username || "", Boolean(me.is_admin));
         await loadBanks();
         await loadStats();
       }

@@ -54,4 +54,8 @@ GitHub 仓库已包含 render.yaml。若 Render 已连接该仓库，推送 main
   Start：gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8
 进度文件默认写在应用目录；若需持久化，请挂载磁盘并把环境变量 DATA_DIR 指到该路径。
 
+管理员账号：环境变量 ADMIN_USERNAME（默认 admin）与 ADMIN_PASSWORD。
+本地未设置时默认密码为 admin123456。登录后打开 /admin 查看账号密码台账并审批新注册。
+已有账号会自动视为「已通过」，不受影响。
+
 --------------------------------------------------------------------------------

@@ -30,6 +30,15 @@ body {
   padding: 2rem 1.25rem 3rem;
 }
 
+.app--wide {
+  max-width: 1100px;
+}
+
+.header-actions {
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
 .header {
   text-align: center;
   margin-bottom: 1.75rem;
@@ -118,13 +127,25 @@ body {
 }
 
 .field input {
-  width: 6rem;
+  width: 100%;
+  max-width: 22rem;
   padding: 0.5rem 0.65rem;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
   font-size: 1rem;
+}
+
+.auth-hint {
+  margin: 0 0 0.9rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.auth-hint a {
+  color: var(--accent);
 }
 
 .btn {
@@ -418,6 +439,81 @@ body {
   border-radius: 8px;
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.notice {
+  color: #86efac;
+  font-size: 0.9rem;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.ledger-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.ledger-table th,
+.ledger-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 0.45rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.ledger-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.password-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+
+.ledger-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.btn-sm {
+  padding: 0.28rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.status-pending {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.status-approved {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.status-rejected {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .footer {
