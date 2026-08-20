@@ -61,12 +61,7 @@ GitHub 仓库是 https://github.com/AimePython/shuati ，代码已推送；Rende
      Build：pip install -r requirements.txt
      Start：gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8
 
-部署完成后，在 Environment 里复制 ADMIN_PASSWORD（Blueprint 会自动生成），用 admin 登录
-  https://<服务名>.onrender.com/admin
-审批新注册。账号数据默认写在应用目录，免费实例重启会丢；若要保留台账，请加一块磁盘并把 DATA_DIR 指到挂载路径。
-
-管理员账号：环境变量 ADMIN_USERNAME（默认 admin）与 ADMIN_PASSWORD。
-本地未设置时默认密码为 admin123456。登录后打开 /admin 查看账号密码台账并审批新注册。
+账号数据默认写在应用目录，免费实例重启会丢；若要保留台账，请加一块磁盘并把 DATA_DIR 指到挂载路径。
 已有账号会自动视为「已通过」，不受影响。
 
 --------------------------------------------------------------------------------

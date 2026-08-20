@@ -111,12 +111,7 @@ def _admin_username() -> str:
 
 
 def _admin_password() -> str:
-    env = (os.environ.get("ADMIN_PASSWORD") or "").strip()
-    if env:
-        return env
-    if os.environ.get("RENDER"):
-        return ""
-    return "admin123456"
+    return (os.environ.get("ADMIN_PASSWORD") or "").strip()
 
 
 def _blank_user(
@@ -226,7 +221,6 @@ def _ensure_admin(users: dict[str, dict]) -> bool:
         return False
     password = _admin_password()
     if not password:
-        print("⚠ 未设置 ADMIN_PASSWORD，跳过创建管理员。请在环境变量中配置后重启。")
         return False
     if rec and rec.get("password_hash"):
         rec["role"] = "admin"
@@ -243,8 +237,6 @@ def _ensure_admin(users: dict[str, dict]) -> bool:
         reviewed_at=_now_text(),
         reviewed_by="bootstrap",
     )
-    print(f"\n已创建管理员账号：用户名 {name}  （密码见环境变量 ADMIN_PASSWORD，本地默认 admin123456）")
-    print("审批入口：/admin\n")
     return True
 
 
