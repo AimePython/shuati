@@ -66,6 +66,45 @@
   let currentPaperName = "";
   let currentQuestion = null;
   let questionLoadSeq = 0;
+  const pendingAnswers = new Map();
+
+  function rememberPending(qid, answer) {
+    pendingAnswers.set(Number(qid), { qid: Number(qid), answer });
+  }
+
+  function forgetPending(qid) {
+    pendingAnswers.delete(Number(qid));
+  }
+
+  function postKeepalive(url, bodyObj) {
+    const body = typeof bodyObj === "string" ? bodyObj : JSON.stringify(bodyObj);
+    let queued = false;
+    if (navigator.sendBeacon) {
+      queued = navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }));
+    }
+    if (!queued) {
+      try {
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body,
+          keepalive: true,
+          credentials: "same-origin",
+        });
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
+  function flushPendingProgress() {
+    const items = Array.from(pendingAnswers.values());
+    if (items.length) {
+      const payload = items.length === 1 ? items[0] : { answers: items };
+      postKeepalive("/api/answer", payload);
+    }
+    postKeepalive("/api/progress/flush", {});
+  }
 
   function refreshRoundModeUI() {
     const isWrong = currentRoundMode === "wrong";
@@ -80,9 +119,12 @@
   }
 
   async function fetchJSON(url, options) {
+    const opts = options || {};
     const r = await fetch(url, {
-      ...options,
-      headers: { "Content-Type": "application/json", ...(options && options.headers) },
+      credentials: "same-origin",
+      ...opts,
+      keepalive: Boolean(opts.keepalive),
+      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     });
     const data = await r.json().catch(() => ({}));
     if (r.status === 401) {
@@ -422,11 +464,14 @@
       bumpStatsOptimistic(q.status, isOk);
     }
 
+    rememberPending(qid, answerStr);
     fetchJSON("/api/answer", {
       method: "POST",
+      keepalive: true,
       body: JSON.stringify({ qid, answer: answerStr }),
     })
       .then((res) => {
+        forgetPending(qid);
         const stillOnSame =
           idx === submittedIdx &&
           roundIds[idx] === qid &&
@@ -662,15 +707,44 @@
 
   els.btnLogin.addEventListener("click", () => auth("login"));
   els.btnRegister.addEventListener("click", () => auth("register"));
+  async function flushPendingAndWait() {
+    const items = Array.from(pendingAnswers.values());
+    if (items.length) {
+      try {
+        const payload = items.length === 1 ? items[0] : { answers: items };
+        await fetchJSON("/api/answer", {
+          method: "POST",
+          keepalive: true,
+          body: JSON.stringify(payload),
+        });
+        pendingAnswers.clear();
+      } catch (_) {
+        flushPendingProgress();
+      }
+    }
+    try {
+      await fetchJSON("/api/progress/flush", { method: "POST", body: "{}" });
+    } catch (_) {
+      postKeepalive("/api/progress/flush", {});
+    }
+  }
+
   els.btnLogout.addEventListener("click", async () => {
     clearError();
     try {
+      await flushPendingAndWait();
       await fetchJSON("/api/auth/logout", { method: "POST", body: "{}" });
     } catch (_) {
-      // 即使后端响应异常也允许本地回到未登录态
+      flushPendingProgress();
     }
     setLoggedOutState();
   });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPendingProgress();
+  });
+  window.addEventListener("pagehide", flushPendingProgress);
+  window.addEventListener("beforeunload", flushPendingProgress);
 
   async function boot() {
     setLoggedOutState();

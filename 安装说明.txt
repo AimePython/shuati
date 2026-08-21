@@ -46,8 +46,11 @@ https://<你的用户名>.github.io/<仓库名>/ 这类地址）：
    Source 选「Deploy from a branch」，Branch 选 main（或你的默认分支），文件夹选「/docs」保存。
 5. 等待几分钟后用浏览器访问站点。更新题库后需重新执行 export 并推送 docs/ 下的 JSON。
 
-说明：在线版纯静态页面，进度保存在访客浏览器的 localStorage，与桌面版 CSV 不互通；
-换浏览器或清除数据会丢进度。
+说明：GitHub Pages 纯静态页默认把进度存在访客浏览器，换设备或清缓存会丢失，也无法多端同步。
+多端同步请使用同一账号登录已部署的 Flask/Render 网站（不要只用 Pages）。
+若要把 Pages 接到 Render：在 docs/config.js 填写 SHUATI_API_BASE 为你的 Render 地址（不要猜、不要写密码）；
+同时在 Render 环境变量 CORS_ORIGINS 填 Pages 的 origin（例如 https://yourname.github.io）。
+更新题库后需重新执行 export 并推送 docs/ 下的 JSON。
 
 --------------------------------------------------------------------------------
 【四、Render 后端（Flask）】
@@ -65,7 +68,11 @@ GitHub 仓库是 https://github.com/AimePython/shuati ，代码已推送；Rende
      Build：pip install -r requirements.txt
      Start：gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8
 
-账号数据默认写在应用目录，免费实例重启会丢；若要保留台账，请加一块磁盘并把 DATA_DIR 指到挂载路径。
+账号与做题进度默认写在应用目录（user_progress 下的 CSV）。免费实例磁盘是临时的，重启会丢。
+若要长期保留并多端同步，请在 Render 加一块持久磁盘，并把环境变量 DATA_DIR 指到挂载路径（例如 /data）。
+免费套餐通常不能挂磁盘；不要在 render.yaml 里写 disk，以免 Blueprint 部署失败。代码会读取 DATA_DIR。
 已有账号会自动视为「已通过」，不受影响。
+
+关页是否保存：在服务端网页答题后立刻关标签，再换浏览器（或清 cookie 后）用同一账号登录，已做题与错题本应仍在。
 
 --------------------------------------------------------------------------------

@@ -55,9 +55,14 @@ app = Flask(
 )
 app.secret_key = os.environ.get("SECRET_KEY", "please-change-this-secret-key")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-if os.environ.get("RENDER"):
+# 跨站（例如 GitHub Pages 调 Render）需要 SameSite=None；同站 Render 网页保持 Lax。
+if os.environ.get("CORS_ORIGINS", "").strip():
+    app.config["SESSION_COOKIE_SAMESITE"] = "None"
     app.config["SESSION_COOKIE_SECURE"] = True
+else:
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    if os.environ.get("RENDER"):
+        app.config["SESSION_COOKIE_SECURE"] = True
 _bank_by_user: dict[str, QuestionBank] = {}
 _bank_lock = Lock()
 _accounts_ready = False
@@ -66,11 +71,25 @@ _accounts_ready = False
 @app.before_request
 def _bootstrap_accounts() -> None:
     global _accounts_ready
+    if request.method == "OPTIONS" and _cors_allow_origin():
+        return ("", 204)
     if _accounts_ready:
         return
     with _users_lock:
         _load_users()
     _accounts_ready = True
+
+
+@app.after_request
+def _add_cors_headers(resp):
+    origin = _cors_allow_origin()
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Vary"] = "Origin"
+    return resp
 
 
 def _data_dir() -> str:
@@ -294,19 +313,80 @@ def _valid_username(username: str) -> bool:
 
 
 def _user_progress_path(username: str, bank_id: str) -> str:
+    canonical = os.path.join(_progress_dir(), f"{username}__{bank_id}.csv")
+    if os.path.exists(canonical):
+        return canonical
     if bank_id == DEFAULT_BANK_ID:
         legacy = os.path.join(_progress_dir(), f"{username}.csv")
         if os.path.exists(legacy):
             return legacy
-    return os.path.join(_progress_dir(), f"{username}__{bank_id}.csv")
+    return canonical
 
 
 def _user_wrong_book_path(username: str, bank_id: str) -> str:
+    canonical = os.path.join(_progress_dir(), f"{username}__{bank_id}_wrong_book.csv")
+    if os.path.exists(canonical):
+        return canonical
     if bank_id == DEFAULT_BANK_ID:
         legacy = os.path.join(_progress_dir(), f"{username}_wrong_book.csv")
         if os.path.exists(legacy):
             return legacy
-    return os.path.join(_progress_dir(), f"{username}__{bank_id}_wrong_book.csv")
+    return canonical
+
+
+def _json_body() -> dict:
+    """JSON 或 sendBeacon(text/plain) 的请求体。"""
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        return {"answers": data}
+    raw = request.get_data(cache=True, as_text=True) or ""
+    raw = raw.strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        return {"answers": parsed}
+    return {}
+
+
+def _cors_origins() -> list[str]:
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    return [x.strip().rstrip("/") for x in raw.split(",") if x.strip()]
+
+
+def _cors_allow_origin() -> str | None:
+    origins = _cors_origins()
+    if not origins:
+        return None
+    origin = (request.headers.get("Origin") or "").strip().rstrip("/")
+    if origin and origin in origins:
+        return origin
+    return None
+
+
+def _drop_user_banks(username: str, *, flush: bool = True) -> None:
+    """丢掉内存题库，下次 get_bank() 从 CSV 重新加载（登录恢复 / 多端以磁盘为准）。"""
+    if not username:
+        return
+    prefix = f"{username}::"
+    with _bank_lock:
+        keys = [k for k in _bank_by_user if k.startswith(prefix)]
+        banks = [_bank_by_user.pop(k) for k in keys]
+    if flush:
+        for b in banks:
+            try:
+                b.flush_to_disk()
+            except Exception:
+                pass
 
 
 def _current_user() -> str | None:
@@ -429,6 +509,7 @@ def api_auth_login():
     if status == "rejected":
         return jsonify({"ok": False, "error": "该账号未通过审批，无法登录"}), 403
     session["username"] = username
+    _drop_user_banks(username, flush=True)
     return jsonify(
         {
             "ok": True,
@@ -443,15 +524,9 @@ def api_auth_login():
 def api_auth_logout():
     user = _current_user()
     if user:
-        prefix = f"{user}::"
-        with _bank_lock:
-            banks = [b for k, b in _bank_by_user.items() if k.startswith(prefix)]
-        for b in banks:
-            try:
-                b.flush_to_disk()
-            except Exception:
-                pass
+        _drop_user_banks(user, flush=True)
     session.pop("username", None)
+    session.pop("bank_id", None)
     return jsonify({"ok": True})
 
 
@@ -611,7 +686,7 @@ def api_select_bank():
     try:
         if not _current_user():
             return jsonify({"ok": False, "error": "未登录"}), 401
-        data = request.get_json(silent=True) or {}
+        data = _json_body()
         bid = str(data.get("bank_id", "")).strip()
         known = {m["id"] for m in list_banks()}
         if bid not in known:
@@ -635,7 +710,7 @@ def api_round_start():
     try:
         if not _current_user():
             return jsonify({"ok": False, "error": "未登录"}), 401
-        data = request.get_json(silent=True) or {}
+        data = _json_body()
         mode = str(data.get("mode", "normal")).strip().lower()
         b = get_bank()
         paper_id = str(data.get("paper_id", "")).strip()
@@ -696,46 +771,113 @@ def api_question(qid: int):
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _normalize_answer_value(raw) -> str:
+    if isinstance(raw, list):
+        return "".join(str(x) for x in raw)
+    return str(raw).strip()
+
+
+def _apply_one_answer(b, qid: int, ans: str) -> dict:
+    sub = b.df[b.df["question_index"] == qid]
+    if sub.empty:
+        raise ValueError("题目不存在")
+    row = sub.iloc[0]
+    qt = str(row["题目类型"])
+    std = str(row["标准答案"]).strip()
+    is_ok = check_answer(ans, std, qt)
+    b.update_question_status(qid, is_ok)
+    if not is_ok:
+        b.record_wrong_question(qid)
+    disp = format_standard_display(std, qt)
+    return {
+        "ok": True,
+        "qid": int(qid),
+        "correct": is_ok,
+        "your_answer": ans,
+        "correct_answer": std,
+        "correct_answer_display": disp,
+        "explanation": str(row["解析"]),
+        "question_type": qt,
+    }
+
+
+def _stats_payload(b) -> dict:
+    return {
+        "bank_id": b.bank_id,
+        "bank_name": b.bank_name,
+        **b.get_stats(),
+    }
+
+
+@app.route("/api/progress")
+def api_progress():
+    try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
+        b = get_bank()
+        qi = b.df["question_index"].astype(int)
+        st = b.df["status"].astype(str)
+        statuses = {str(int(i)): str(s) for i, s in zip(qi, st)}
+        stats = b.get_stats()
+        return jsonify(
+            {
+                "ok": True,
+                "bank_id": b.bank_id,
+                "bank_name": b.bank_name,
+                **stats,
+                "wrong_book_count": stats["wrong_book"],
+                "wrong_book": sorted(int(x) for x in b.wrong_book),
+                "statuses": statuses,
+            }
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/progress/flush", methods=["POST"])
+def api_progress_flush():
+    try:
+        if not _current_user():
+            return jsonify({"ok": False, "error": "未登录"}), 401
+        b = get_bank()
+        b.flush_to_disk()
+        return jsonify({"ok": True, "stats": _stats_payload(b)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/answer", methods=["POST"])
 def api_answer():
     try:
         if not _current_user():
             return jsonify({"ok": False, "error": "未登录"}), 401
-        data = request.get_json(silent=True) or {}
-        qid = int(data.get("qid"))
-        raw = data.get("answer", "")
-        if isinstance(raw, list):
-            ans = "".join(str(x) for x in raw)
-        else:
-            ans = str(raw).strip()
+        data = _json_body()
         b = get_bank()
-        sub = b.df[b.df["question_index"] == qid]
-        if sub.empty:
-            return jsonify({"ok": False, "error": "题目不存在"}), 404
-        row = sub.iloc[0]
-        qt = str(row["题目类型"])
-        std = str(row["标准答案"]).strip()
-        is_ok = check_answer(ans, std, qt)
-        b.update_question_status(qid, is_ok)
-        if not is_ok:
-            b.record_wrong_question(qid)
-        disp = format_standard_display(std, qt)
-        return jsonify(
-            {
-                "ok": True,
-                "correct": is_ok,
-                "your_answer": ans,
-                "correct_answer": std,
-                "correct_answer_display": disp,
-                "explanation": str(row["解析"]),
-                "question_type": qt,
-                "stats": {
-                    "bank_id": b.bank_id,
-                    "bank_name": b.bank_name,
-                    **b.get_stats(),
-                },
-            }
-        )
+        items = data.get("answers")
+        if isinstance(items, list):
+            results = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                qid = int(item.get("qid"))
+                ans = _normalize_answer_value(item.get("answer", ""))
+                results.append(_apply_one_answer(b, qid, ans))
+            b.flush_to_disk()
+            return jsonify(
+                {
+                    "ok": True,
+                    "results": results,
+                    "stats": _stats_payload(b),
+                }
+            )
+        qid = int(data.get("qid"))
+        ans = _normalize_answer_value(data.get("answer", ""))
+        payload = _apply_one_answer(b, qid, ans)
+        b.flush_to_disk()
+        payload["stats"] = _stats_payload(b)
+        return jsonify(payload)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 404
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -747,6 +889,7 @@ def api_wrong_book_clear():
             return jsonify({"ok": False, "error": "未登录"}), 401
         b = get_bank()
         cleared = b.clear_wrong_book()
+        b.flush_to_disk()
         return jsonify({"ok": True, "cleared": cleared})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

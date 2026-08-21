@@ -427,7 +427,8 @@ class QuestionBank:
         with self._state_lock:
             if self._flush_timer is not None:
                 return
-            timer = threading.Timer(0.25, self.flush_to_disk)
+            # 短防抖：同一次连点不会把大 CSV 写很多遍；Web 接口仍会在响应前强制 flush。
+            timer = threading.Timer(0.05, self.flush_to_disk)
             timer.daemon = True
             self._flush_timer = timer
             timer.start()

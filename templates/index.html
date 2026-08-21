@@ -10,7 +10,7 @@
   <div class="app">
     <header class="header">
       <h1>电力交易员 · 刷题</h1>
-      <p class="subtitle">错题优先 · 进度自动保存（多用户独立）</p>
+      <p class="subtitle">错题优先 · 进度保存在账号下，关闭网页也会提交；换设备请用同一账号登录本站点</p>
       <p class="subtitle" id="whoami" hidden>当前用户：<strong id="whoami-name"></strong></p>
       <div class="actions header-actions">
         <a class="btn ghost" id="btn-admin" href="/admin" hidden>账号台账</a>
@@ -20,7 +20,7 @@
 
     <section class="panel" id="auth-panel">
       <h2>登录 / 注册</h2>
-      <p class="auth-hint">新账号提交后需管理员审批才能登录。</p>
+      <p class="auth-hint">新账号提交后需管理员审批才能登录。同一账号在本服务端可恢复进度并多端同步。</p>
       <label class="field">
         用户名（3-32 位，字母/数字/下划线）
         <input type="text" id="auth-username" maxlength="32" />
@@ -99,7 +99,7 @@
       <button type="button" class="btn primary" id="btn-back">返回首页</button>
     </section>
 
-    <footer class="footer">每个账号的数据保存在本目录 <code>user_progress/&lt;用户名&gt;.csv</code></footer>
+    <footer class="footer">进度写入服务端 <code>user_progress</code>（可用环境变量 <code>DATA_DIR</code> 指到持久目录）。多端同步请用同一账号登录本站点，不要只用 GitHub Pages 纯静态页。</footer>
   </div>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

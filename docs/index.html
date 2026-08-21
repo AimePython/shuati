@@ -10,7 +10,7 @@
   <div class="app">
     <header class="header">
       <h1>电力交易员 · 刷题</h1>
-      <p class="subtitle">在线版 · 错题优先 · 多账号（数据仅在本机浏览器）</p>
+      <p class="subtitle">在线版 · 错题优先。多端同步请使用在线服务端（同一账号登录已部署的刷题网站）</p>
       <p class="subtitle" id="whoami" hidden>当前用户：<strong id="whoami-name"></strong></p>
       <div class="actions header-actions">
         <a class="btn ghost" id="btn-admin" href="./admin.html" hidden>账号台账</a>
@@ -20,7 +20,7 @@
 
     <section class="panel" id="auth-panel">
       <h2>登录 / 注册</h2>
-      <p class="auth-hint">新账号提交后需管理员审批才能登录。本机网页版数据仅保存在当前浏览器。</p>
+      <p class="auth-hint">新账号提交后需管理员审批才能登录。本 GitHub Pages 页默认只把进度存在当前浏览器；多端同步请使用在线服务端。</p>
       <label class="field">
         用户名（3-32 位，字母/数字/下划线）
         <input type="text" id="auth-username" maxlength="32" autocomplete="username" />
@@ -129,8 +129,9 @@
       <button type="button" class="btn primary" id="btn-back">返回首页</button>
     </section>
 
-    <footer class="footer">每个账号的进度保存在本机 localStorage；新注册用户无历史错题。密码为浏览器端摘要存储，勿用于高敏感场景。</footer>
+    <footer class="footer" id="sync-footer">多端同步请使用在线服务端（同一账号登录已部署的刷题网站）。本页默认仅保存在当前浏览器，清除缓存或换设备会丢失进度。</footer>
   </div>
-  <script src="./js/app.js?v=20260820e"></script>
+  <script src="./config.js"></script>
+  <script src="./js/app.js?v=20260821a"></script>
 </body>
 </html>

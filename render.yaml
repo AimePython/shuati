@@ -14,3 +14,4 @@ services:
         value: admin
       - key: ADMIN_PASSWORD
         generateValue: true
+    # 免费套餐不能挂 persistent disk。若已在控制台加了磁盘，请自行设置 DATA_DIR 指向挂载路径。

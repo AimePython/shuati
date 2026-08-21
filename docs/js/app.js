@@ -70,6 +70,70 @@
   /** @type {Array<{id:string,name:string,short_name?:string,file:string}>} */
   let banksCatalog = [];
   const BANK_PREF_KEY = "dl_trader_pages_bank_v1";
+  const pendingAnswers = new Map();
+
+  function apiBase() {
+    const raw = String(window.SHUATI_API_BASE || "").trim();
+    return raw.replace(/\/+$/, "");
+  }
+
+  function useRemote() {
+    return Boolean(apiBase());
+  }
+
+  function apiUrl(path) {
+    const base = apiBase();
+    const p = path.startsWith("/") ? path : `/${path}`;
+    return base ? `${base}${p}` : p;
+  }
+
+  function rememberPending(qid, answer) {
+    pendingAnswers.set(Number(qid), { qid: Number(qid), answer });
+  }
+
+  function forgetPending(qid) {
+    pendingAnswers.delete(Number(qid));
+  }
+
+  function postKeepalive(path, bodyObj) {
+    const body = JSON.stringify(bodyObj);
+    const url = apiUrl(path);
+    let queued = false;
+    if (navigator.sendBeacon) {
+      queued = navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }));
+    }
+    if (!queued) {
+      try {
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body,
+          keepalive: true,
+          credentials: useRemote() ? "include" : "same-origin",
+        });
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+
+  async function apiJSON(path, options) {
+    const opts = options || {};
+    const r = await fetch(apiUrl(path), {
+      credentials: useRemote() ? "include" : "same-origin",
+      ...opts,
+      keepalive: Boolean(opts.keepalive),
+      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      throw new Error(data.error || "请先登录");
+    }
+    if (!r.ok || data.ok === false) {
+      throw new Error(data.error || data.detail || r.statusText || "请求失败");
+    }
+    return data;
+  }
 
   let roundIds = [];
   let idx = 0;
@@ -300,6 +364,71 @@
     saveProgressMap(progress);
   }
 
+  function applyRemoteProgress(data) {
+    const statuses = data && data.statuses && typeof data.statuses === "object" ? data.statuses : {};
+    const progress = {};
+    Object.keys(statuses).forEach((k) => {
+      progress[String(k)] = String(statuses[k]);
+    });
+    bank = mergeBank(baseQuestions, progress);
+    wrongBook =
+      data && Array.isArray(data.wrong_book)
+        ? new Set(data.wrong_book.map((x) => Number(x)).filter((x) => Number.isInteger(x)))
+        : new Set();
+    persistBankProgress();
+  }
+
+  async function loadRemoteProgress() {
+    const data = await apiJSON("/api/progress");
+    if (data.bank_id && data.bank_id !== currentBankId) {
+      await loadBankFile(data.bank_id);
+    }
+    applyRemoteProgress(data);
+  }
+
+  function flushPendingProgress() {
+    persistBankProgress();
+    if (!useRemote()) return;
+    const items = Array.from(pendingAnswers.values());
+    if (items.length) {
+      const payload = items.length === 1 ? items[0] : { answers: items };
+      postKeepalive("/api/answer", payload);
+    }
+    postKeepalive("/api/progress/flush", {});
+  }
+
+  async function flushPendingAndWait() {
+    persistBankProgress();
+    if (!useRemote()) return;
+    const items = Array.from(pendingAnswers.values());
+    if (items.length) {
+      try {
+        const payload = items.length === 1 ? items[0] : { answers: items };
+        await apiJSON("/api/answer", {
+          method: "POST",
+          keepalive: true,
+          body: JSON.stringify(payload),
+        });
+        pendingAnswers.clear();
+      } catch (_) {
+        flushPendingProgress();
+      }
+    }
+    try {
+      await apiJSON("/api/progress/flush", { method: "POST", body: "{}" });
+    } catch (_) {
+      postKeepalive("/api/progress/flush", {});
+    }
+  }
+
+  function updateSyncFooter() {
+    const el = document.getElementById("sync-footer");
+    if (!el) return;
+    if (useRemote()) {
+      el.textContent = "已连接到在线服务端：进度保存在服务器，同一账号可多端同步。";
+    }
+  }
+
   function getImportWrongBookMode() {
     const el = document.querySelector('input[name="import-wb-mode"]:checked');
     return el && el.value === "index" ? "index" : "bank";
@@ -492,15 +621,19 @@
     refreshRoundModeUI();
   }
 
-  function setLoggedInUI(username) {
+  function setLoggedInUI(username, isAdmin) {
     currentUser = username;
     els.authPanel.hidden = true;
     els.whoami.hidden = false;
     els.btnLogout.hidden = false;
     els.whoamiName.textContent = username;
     if (els.btnAdmin) {
-      const rec = loadUsers()[username];
-      els.btnAdmin.hidden = !(rec && rec.role === "admin" && rec.status === "approved");
+      if (typeof isAdmin === "boolean") {
+        els.btnAdmin.hidden = !isAdmin;
+      } else {
+        const rec = loadUsers()[username];
+        els.btnAdmin.hidden = !(rec && rec.role === "admin" && rec.status === "approved");
+      }
     }
     els.statsPanel.hidden = false;
     els.startPanel.hidden = false;
@@ -639,10 +772,18 @@
     els.btnNext.disabled = false;
 
     updateQuestionStatus(qid, isOk);
-    requestAnimationFrame(() => {
-      persistBankProgress();
-      renderStats();
-    });
+    persistBankProgress();
+    renderStats();
+    if (useRemote()) {
+      rememberPending(qid, answerStr);
+      apiJSON("/api/answer", {
+        method: "POST",
+        keepalive: true,
+        body: JSON.stringify({ qid, answer: answerStr }),
+      })
+        .then(() => forgetPending(qid))
+        .catch((e) => showError(e.message || String(e)));
+    }
   }
 
   function getQuestionById(qid) {
@@ -788,17 +929,26 @@
     });
   }
 
-  els.btnClearWrongBook.addEventListener("click", () => {
+  els.btnClearWrongBook.addEventListener("click", async () => {
     clearError();
     const ok = window.confirm("确认清空错题本？此操作不会改动当前做题进度。");
     if (!ok) return;
-    wrongBook = new Set();
-    persistBankProgress();
-    if (currentRoundMode === "wrong") {
-      currentRoundMode = "normal";
-      refreshRoundModeUI();
+    try {
+      if (useRemote()) {
+        await apiJSON("/api/wrong-book/clear", { method: "POST", body: "{}" });
+        await loadRemoteProgress();
+      } else {
+        wrongBook = new Set();
+        persistBankProgress();
+      }
+      if (currentRoundMode === "wrong") {
+        currentRoundMode = "normal";
+        refreshRoundModeUI();
+      }
+      renderStats();
+    } catch (e) {
+      showError(e.message || String(e));
     }
-    renderStats();
   });
 
   const importWbFile = document.getElementById("import-wb-file");
@@ -907,6 +1057,15 @@
       showError("密码至少 6 位");
       return;
     }
+    if (useRemote()) {
+      const res = await apiJSON("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      els.authPassword.value = "";
+      showNotice(res.message || "已提交注册，请等待管理员审批通过后再登录。");
+      return;
+    }
     const users = loadUsers();
     if (users[username]) {
       if (users[username].status === "pending") {
@@ -937,6 +1096,19 @@
     clearError();
     const username = (els.authUsername.value || "").trim();
     const password = (els.authPassword.value || "").trim();
+    if (useRemote()) {
+      const res = await apiJSON("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      setSessionUser(res.username || username);
+      setLoggedInUI(res.username || username, Boolean(res.is_admin));
+      await loadRemoteProgress();
+      renderBankButtons();
+      renderPaperSelect();
+      renderStats();
+      return;
+    }
     const users = loadUsers();
     const rec = users[username];
     if (!rec || !rec.salt || !rec.hash) {
@@ -968,8 +1140,16 @@
   els.btnRegister.addEventListener("click", () => {
     tryRegister().catch((e) => showError(e.message || String(e)));
   });
-  els.btnLogout.addEventListener("click", () => {
+  els.btnLogout.addEventListener("click", async () => {
     clearError();
+    try {
+      await flushPendingAndWait();
+      if (useRemote()) {
+        await apiJSON("/api/auth/logout", { method: "POST", body: "{}" });
+      }
+    } catch (_) {
+      flushPendingProgress();
+    }
     setSessionUser("");
     setLoggedOutUI();
     bank = [];
@@ -1022,11 +1202,21 @@
   }
 
   async function selectBank(bankId) {
-    if (bankId === currentBankId) return;
+    if (bankId === currentBankId && !useRemote()) return;
     clearError();
     try {
+      if (useRemote()) {
+        await apiJSON("/api/bank", {
+          method: "POST",
+          body: JSON.stringify({ bank_id: bankId }),
+        });
+      }
       await loadBankFile(bankId);
-      rebuildBank();
+      if (useRemote()) {
+        await loadRemoteProgress();
+      } else {
+        rebuildBank();
+      }
       renderBankButtons();
       renderPaperSelect();
       renderStats();
@@ -1041,6 +1231,7 @@
   async function boot() {
     clearError();
     setLoggedOutUI();
+    updateSyncFooter();
     try {
       const cr = await fetch("banks.json", { cache: "no-store" });
       if (cr.ok) {
@@ -1067,6 +1258,23 @@
       }
       await loadBankFile(currentBankId);
 
+      if (useRemote()) {
+        try {
+          const me = await apiJSON("/api/auth/me");
+          if (me.logged_in) {
+            setSessionUser(me.username || "");
+            setLoggedInUI(me.username || "", Boolean(me.is_admin));
+            await loadRemoteProgress();
+            renderBankButtons();
+            renderPaperSelect();
+            renderStats();
+          }
+        } catch (e) {
+          showError(e.message || String(e));
+        }
+        return;
+      }
+
       const sess = getSessionUser();
       const users = loadUsers();
       const rec = sess ? users[sess] : null;
@@ -1081,6 +1289,12 @@
       showError(e.message || String(e));
     }
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPendingProgress();
+  });
+  window.addEventListener("pagehide", flushPendingProgress);
+  window.addEventListener("beforeunload", flushPendingProgress);
 
   boot();
 })();
